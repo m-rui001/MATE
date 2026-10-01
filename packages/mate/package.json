@@ -1,0 +1,31 @@
+{
+	"name": "@earendil-works/pi-mate",
+	"version": "0.1.0",
+	"description": "MATE deterministic affective kernel for pi-based companions (offline catch-up, sealed self, autonomous loop)",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": ["dist"],
+	"scripts": {
+		"clean": "shx rm -rf dist",
+		"build": "tsc -p tsconfig.build.json",
+		"test": "vitest --run"
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"@types/node": "22.19.19",
+		"shx": "0.4.0",
+		"typescript": "7.0.2",
+		"vitest": "4.1.11"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"license": "MIT"
+}

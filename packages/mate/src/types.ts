@@ -1,0 +1,205 @@
+/**
+ * MATE kernel types.
+ *
+ * Reference: Lobozov, S. "MATE: A Deterministic Affective Middleware for LLM-Based Companions
+ * with Emergent Character and Persistent Internal State", v8, Zenodo 20400530 (CC-BY-4.0).
+ *
+ * The kernel is a pure function transition(state, event, dt) -> state with zero LLM calls.
+ * Every value below is bounded: emotions in [0,1], PAD components in [-1,1], traits in [0,1].
+ */
+
+/** The 8 Plutchik primary emotions, in the fixed order used by the density matrix. */
+export const EMOTIONS = [
+	"joy",
+	"trust",
+	"fear",
+	"surprise",
+	"sadness",
+	"disgust",
+	"anger",
+	"anticipation",
+] as const;
+
+export type Emotion = (typeof EMOTIONS)[number];
+export type EmotionVector = Record<Emotion, number>;
+
+/** Pleasure-Arousal-Dominance, each component in [-1, +1]. */
+export interface PAD {
+	p: number;
+	a: number;
+	d: number;
+}
+
+/** Big Five personality, each dimension in [0, 1]. Fixed per message; drifts weekly only. */
+export interface Personality {
+	o: number; // openness
+	c: number; // conscientiousness
+	e: number; // extraversion
+	a: number; // agreeableness
+	n: number; // neuroticism
+}
+
+/**
+ * The 30-trait character system (SOUL). All traits in [0,1] except optimismBias in [-0.3,+0.3].
+ * Traits are the slowly-moving layer: personality is nature, character is nurture.
+ */
+export interface Character {
+	selfWorth: number;
+	selfEfficacy: number;
+	optimismBias: number;
+	trustBaseline: number;
+	attachmentAnxiety: number;
+	attachmentAvoidance: number;
+	reflectiveness: number;
+	directness: number;
+	depthPreference: number;
+	humor: number;
+	warmth: number;
+	vitality: number;
+	curiosity: number;
+	growthOrientation: number;
+	tolerance: number; // patience with silence
+	impulsivity: number;
+	rumination: number;
+	vulnerability: number;
+	assertiveness: number;
+	empathy: number;
+	skepticism: number;
+	playfulness: number;
+	tenderness: number;
+	independence: number;
+	needForClosure: number;
+	sensuality: number;
+	spirituality: number;
+	ambition: number;
+	frugality: number;
+	loyalty: number;
+}
+
+export type TraitName = keyof Character;
+
+/** Relationship tensor toward the single interlocutor. */
+export interface Relationship {
+	trust: number;
+	attachment: number;
+	respect: number;
+	frustration: number;
+	familiarity: number;
+	unanswered: number; // consecutive messages we chose not to answer
+}
+
+/** Homeostatic drives. Rise when unmet, decay when satisfied. All in [0,1]. */
+export interface Drives {
+	connection: number;
+	curiosity: number;
+	expression: number;
+	growth: number;
+	rest: number;
+}
+
+/** 5-axis awareness field (Global Workspace analog). */
+export interface Awareness {
+	userPresence: number; // [0,1]
+	conversationWarmth: number; // [0,1]
+	socialPressure: number; // [-1,1]  negative = impulse to reach out
+	thoughtSaturation: number; // [0,1]
+	temporalPhase: number; // [0,1]
+}
+
+/** Allostatic mood regulation state. */
+export interface Allostasis {
+	fatigue: number; // [0,1]
+	load: number; // [0,1] recent cognitive load
+	baselineShift: PAD; // slow-moving personal baseline
+}
+
+/** Opponent-process B-state (Solomon & Corbit) per emotion. */
+export type OpponentVector = Record<Emotion, number>;
+
+/** A complex cell [re, im]. The density matrix is an 8x8 grid of these. */
+export type ComplexCell = [number, number];
+/** 8x8 complex Hermitian density matrix, row-major. */
+export type DensityMatrixState = ComplexCell[][];
+
+/**
+ * The complete affective state. Immutable by convention: the kernel returns a new object.
+ * `t` is wall-clock epoch ms; `lastInteraction` drives every time-based computation.
+ */
+export interface MateState {
+	version: number;
+	t: number;
+	lastInteraction: number;
+	lastHeartbeat: number;
+	born: number;
+	emotions: EmotionVector;
+	opponent: OpponentVector;
+	mood: PAD;
+	personality: Personality;
+	character: Character;
+	relationship: Relationship;
+	drives: Drives;
+	awareness: Awareness;
+	allostasis: Allostasis;
+	/** 8x8 complex Hermitian density matrix, row-major, [re, im] pairs. */
+	rho: DensityMatrixState;
+	/** Dual-process habituation: per-topic System-1 novelty trace. */
+	habituation: Record<string, { s: number; t: number }>;
+	/** Accumulated self-observations (bounded). */
+	observations: string[];
+	/** Monotonic counters, for telemetry and MIRROR-style scoring. */
+	counters: {
+		messages: number;
+		transitions: number;
+		proactiveBlocked: number;
+		proactiveSent: number;
+		sleepCycles: number;
+		dreams: number;
+		observations: number;
+	};
+	/** Cusp catastrophe flag: set when a phase transition has occurred and not yet released. */
+	catastrophe: boolean;
+	/** Last computed subjective duration, ms. Diagnostic only. */
+	perceivedGap: number;
+	/** Seeded PRNG state, so a replay of the same events is bit-identical. */
+	seed: number;
+}
+
+/** Intent classification from intake. */
+export type Intent = "chat" | "question" | "task";
+
+/** An external event fed to the kernel. */
+export interface MateEvent {
+	kind: "user_message" | "proactive" | "self_observation" | "sleep" | "wake" | "tick";
+	/** Plutchik activations in [0,1] produced by appraisal (the only LLM-influenced input). */
+	activations: Partial<EmotionVector>;
+	intensity: number;
+	intent: Intent;
+	/** Text, for habituation keys and memory. Never used by the kernel math itself. */
+	text?: string;
+	t: number;
+}
+
+/** The result of a transition: new state plus cheap diagnostics. */
+export interface TransitionResult {
+	state: MateState;
+	/** Effort band, Eq. 2. Drives the response token ceiling. */
+	effort: EffortBand;
+	/** Token ceiling implied by effort and intent. */
+	tokenCeiling: number;
+	/** Whether a dyad (complex emotion) was detected. */
+	dyads: string[];
+	/** Surprise from self-prediction (Friston): |predicted - actual| PAD norm. */
+	surprise: number;
+}
+
+export type EffortBand = "autopilot" | "brief" | "normal" | "engaged";
+
+/** A thought produced by the autonomous thinking loop. */
+export interface Thought {
+	id: string;
+	kind: "curiosity" | "missing_user" | "pattern" | "promise" | "vulnerability" | "observation";
+	text: string;
+	urgency: number;
+	topic: string;
+	t: number;
+}
