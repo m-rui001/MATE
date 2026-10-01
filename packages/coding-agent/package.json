@@ -54,6 +54,7 @@
 		"@earendil-works/pi-agent-core": "^0.99.2",
 		"@earendil-works/pi-ai": "^0.99.2",
 		"@earendil-works/pi-codemode": "^0.99.2",
+		"@earendil-works/pi-mate": "^0.1.0",
 		"@earendil-works/pi-mcp": "^0.99.2",
 		"@earendil-works/pi-tui": "^0.99.2",
 		"@silvia-odwyer/photon-node": "0.3.4",
