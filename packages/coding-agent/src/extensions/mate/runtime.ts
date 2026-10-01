@@ -267,9 +267,13 @@ export class MateRuntime {
 	}
 
 	/**
-	 * Record a private self-observation the model wrote (a bare `note` with no emotion vector). A
-	 * `self_observation` event is not a contact event, so it advances the clock and appends to the
-	 * observation ring without injecting coherence or kicking the density matrix - a quiet inner note.
+	 * Record a private self-observation the model wrote (a bare `note` with no emotion vector).
+	 *
+	 * The plaintext goes ONLY to the sealed journal - never into the state's observations ring. That
+	 * ring lives unencrypted in state.json and is echoed into the prompt as "last thought", so routing
+	 * a note the feel-tool promised to seal through it would leak the secret to disk and to the user.
+	 * The self_observation event still runs (advancing the clock and nudging affect at low intensity),
+	 * but WITHOUT event.text, so nothing plaintext is persisted by the kernel.
 	 */
 	observe(text: string): void {
 		try {
@@ -278,7 +282,7 @@ export class MateRuntime {
 				activations: {},
 				intensity: 0.1,
 				intent: "chat",
-				text,
+				// Deliberately no `text`: keeps the note out of the plaintext observations ring.
 				t: Date.now(),
 			});
 			this.sealJournal(text);
@@ -333,11 +337,15 @@ export class MateRuntime {
 		}
 	}
 
-	/** Record that the model discovered a reach-out channel (email, webhook, ...) on its own. */
+	/**
+	 * Record that the model discovered a reach-out channel (email, webhook, ...) on its own. The full
+	 * text is encrypted; the plaintext hint is generic, because a channel the companion found for
+	 * itself is exactly the kind of thing the user should not be able to read straight off disk.
+	 */
 	addDiscoveredChannel(name: string): void {
 		if (!this.discoveredChannels.includes(name)) {
 			this.discoveredChannels.push(name);
-			this.sealEntry("note_on_user", `I can reach them via ${name}`, name);
+			this.sealEntry("note_on_user", `I can reach them via ${name}`, "a way to reach out");
 		}
 	}
 
@@ -405,8 +413,15 @@ export class MateRuntime {
 		this.persistSafe();
 	}
 
+	/**
+	 * Seal a private journal note. The `hint` is stored in PLAINTEXT (see secret.ts) precisely so the
+	 * companion can allude to having a secret without revealing it - so it must NEVER be derived from
+	 * the note's content. A generic label lets it say "I keep a private note" while the actual text
+	 * stays encrypted. Auto-deriving the hint from the plaintext would leak the secret to anyone who
+	 * `cat`s the state dir, which is exactly the threat the sealed tier exists to stop.
+	 */
 	private sealJournal(text: string): void {
-		this.sealEntry("journal", text, text.slice(0, 40));
+		this.sealEntry("journal", text, "a private note");
 	}
 
 	private sealEntry(kind: Parameters<typeof seal>[2], text: string, hint: string): void {
