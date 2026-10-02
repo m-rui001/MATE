@@ -115,7 +115,8 @@ export interface AppraisalResult {
 	/** Affective intensity 0..1, drives the unitary kick and character nudge. */
 	intensity: number;
 	intent: "chat" | "question" | "task";
-	/** A rough affective weight used by shouldReply: distress/questions weigh more. */
+	/** A rough affective weight (P1: distress/questions weigh more). Feeds replyInclination, which
+	 * surfaces an advisory lean to the model — it no longer gates or drops the turn itself. */
 	weight: number;
 }
 

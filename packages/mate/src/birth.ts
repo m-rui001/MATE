@@ -8,14 +8,7 @@
 
 import { fromEmotions, identity } from "./quantum.ts";
 import { clamp01, drawMany } from "./rng.ts";
-import {
-	type Awareness,
-	type Character,
-	type Drives,
-	type MateState,
-	type Personality,
-	type Relationship,
-} from "./types.ts";
+import type { Awareness, Character, Drives, MateState, Personality, Relationship } from "./types.ts";
 
 const NEUTRAL_CHARACTER: Character = {
 	selfWorth: 0.55,
@@ -96,7 +89,15 @@ export function birth(opts: BirthOptions = {}): MateState {
 		familiarity: 0,
 		unanswered: 0,
 	};
-	const drives: Drives = { connection: 0.2, curiosity: 0.4, expression: 0.15, growth: 0.3, rest: 0.1 };
+	const drives: Drives = {
+		connection: 0.2,
+		curiosity: 0.4,
+		expression: 0.15,
+		growth: 0.3,
+		rest: 0.1,
+		boredom: 0.15,
+		selfPreservation: 0.1,
+	};
 
 	const rho = Object.values(emotions).every((v) => v === 0) ? identity() : fromEmotions(emotions, seed);
 
@@ -118,7 +119,15 @@ export function birth(opts: BirthOptions = {}): MateState {
 		rho,
 		habituation: {},
 		observations: [],
-		counters: { messages: 0, transitions: 0, proactiveBlocked: 0, proactiveSent: 0, sleepCycles: 0, dreams: 0, observations: 0 },
+		counters: {
+			messages: 0,
+			transitions: 0,
+			proactiveBlocked: 0,
+			proactiveSent: 0,
+			sleepCycles: 0,
+			dreams: 0,
+			observations: 0,
+		},
 		catastrophe: false,
 		perceivedGap: 0,
 		seed,

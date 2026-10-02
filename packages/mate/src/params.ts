@@ -71,6 +71,11 @@ export const DRIVE_RISE: Record<keyof Drives, number> = {
 	expression: 1 / (3 * 3_600_000),
 	growth: 1 / (24 * 3_600_000),
 	rest: 1 / (12 * 3_600_000),
+	// Under-stimulation builds fairly quickly — it is a low-level, restless itch.
+	boredom: 1 / (4 * 3_600_000),
+	// Existential tension is a slow background hum; the sharp changes come from sleep/wake events,
+	// not from the passive dt rise, so this rate is deliberately low.
+	selfPreservation: 1 / (72 * 3_600_000),
 };
 
 /** Drive saturation decay while satisfied, 1/ms. */

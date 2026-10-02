@@ -543,6 +543,15 @@ export const VERSION: string = pkg.version || "0.0.0";
 export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 export const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`;
 
+/**
+ * True only for the official upstream distribution (default package name AND app name AND config
+ * dir). A rebrand/fork (e.g. mate) is NOT official, so upstream-only behaviours — the pi.dev version
+ * ping and first-time setup wizard — must not run against it. NOTE: the npm PACKAGE_NAME is
+ * intentionally left unchanged by the rebrand, so APP_NAME / CONFIG_DIR_NAME are what distinguish us.
+ */
+export const IS_OFFICIAL_DISTRIBUTION =
+	PACKAGE_NAME === "@earendil-works/pi-coding-agent" && APP_NAME === "pi" && CONFIG_DIR_NAME === ".pi";
+
 export function expandTildePath(path: string): string {
 	return normalizePath(path);
 }

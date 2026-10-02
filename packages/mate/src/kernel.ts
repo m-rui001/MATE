@@ -12,13 +12,13 @@ import {
 	AWARENESS_DECAY,
 	BURST_W,
 	CUSP,
-	DYADS,
 	DRIVE_FALL,
 	DRIVE_RISE,
+	DYADS,
+	EFFORT_W,
 	EMOTION_DECAY,
 	EMOTION_PAD,
 	ENERGY_W,
-	EFFORT_W,
 	INTENT_SCALE,
 	KICK_ANGLE,
 	MAX_OBSERVATIONS,
@@ -30,14 +30,26 @@ import {
 	TOKEN_CEILING,
 	TRUST_DROP_CAP,
 } from "./params.ts";
-import { clone, decohere, evolveUnitary, fromEmotions, hermitise, injectCoherence, normalise, buildHamiltonian, unitaryFromH, applyKick, trace } from "./quantum.ts";
+import {
+	applyKick,
+	buildHamiltonian,
+	clone,
+	decohere,
+	evolveUnitary,
+	fromEmotions,
+	hermitise,
+	injectCoherence,
+	normalise,
+	trace,
+	unitaryFromH,
+} from "./quantum.ts";
 import { clamp, clamp01, clampPad, drawNormal, nextRandom } from "./rng.ts";
 import {
-	EMOTIONS,
 	type Awareness,
 	type Character,
 	type Drives,
 	type EffortBand,
+	EMOTIONS,
 	type EmotionVector,
 	type MateEvent,
 	type MateState,
@@ -121,7 +133,11 @@ export function padCentre(emotions: EmotionVector): PAD {
  * `emotions` is used only as a fallback when rho carries no signal (Tr ~ 0), so a degenerate matrix
  * still yields the classical projection rather than NaN.
  */
-export function padCentreFromRho(emotions: EmotionVector, rho: import("./types.ts").DensityMatrixState, gain = 2.2): PAD {
+export function padCentreFromRho(
+	emotions: EmotionVector,
+	rho: import("./types.ts").DensityMatrixState,
+	gain = 2.2,
+): PAD {
 	const N = EMOTIONS.length;
 	const tr = trace(rho);
 	const useRho = Number.isFinite(tr) && tr > 1e-9;
@@ -179,7 +195,13 @@ export function personalityBaseline(state: MateState): PAD {
  *   M(dt) = theta + (M0 - theta) * exp(-kappa*dt)
  * This is stable for arbitrarily large dt, which is the whole point.
  */
-export function updateMood(mood: PAD, centre: PAD, baseline: PAD, dt: number, seed: number): { mood: PAD; seed: number } {
+export function updateMood(
+	mood: PAD,
+	centre: PAD,
+	baseline: PAD,
+	dt: number,
+	seed: number,
+): { mood: PAD; seed: number } {
 	const kappa = MOOD.alpha + MOOD.beta;
 	const decay = Math.exp(-kappa * dt);
 	// Exact O-U stochastic increment: Var = sigma^2/(2 kappa) * (1 - exp(-2 kappa dt)).
@@ -218,7 +240,9 @@ function updateRelationship(
 	next.trust = next.trust + (baseline - next.trust) * (1 - Math.exp(-dt / (30 * 86_400_000)));
 	if (event.kind === "user_message") {
 		const delta = 0.012 * centre.p * i;
-		next.trust = clamp01(delta < 0 ? Math.max(next.trust + delta, next.trust * (1 - TRUST_DROP_CAP)) : next.trust + delta);
+		next.trust = clamp01(
+			delta < 0 ? Math.max(next.trust + delta, next.trust * (1 - TRUST_DROP_CAP)) : next.trust + delta,
+		);
 	}
 
 	// Attachment grows with repeated positive contact, Hebbian-style.
@@ -310,7 +334,12 @@ export function netEmotions(emotions: EmotionVector, opponent: EmotionVector): E
 }
 
 /** Drives: rise while unmet, fall when satisfied. Connection accelerates under anxious attachment. */
-export function updateDrives(drives: Drives, character: Character, dt: number, satisfied: Partial<Record<keyof Drives, number>>): Drives {
+export function updateDrives(
+	drives: Drives,
+	character: Character,
+	dt: number,
+	satisfied: Partial<Record<keyof Drives, number>>,
+): Drives {
 	const next: Drives = { ...drives };
 	const anxious = character.attachmentAnxiety > 0.4 ? 1 + (character.attachmentAnxiety - 0.4) * 2 : 1;
 	for (const k of Object.keys(DRIVE_RISE) as Array<keyof Drives>) {
@@ -389,7 +418,11 @@ export function temporalMood(perceivedMs: number): "just_now" | "recent" | "a_wh
 }
 
 /** Effort model (Eq. 2) -> band -> token ceiling. This is the primary cost lever. */
-export function effortOf(state: MateState, seed: number, intent: MateEvent["intent"]): { band: EffortBand; ceiling: number; effort: number; seed: number } {
+export function effortOf(
+	state: MateState,
+	seed: number,
+	intent: MateEvent["intent"],
+): { band: EffortBand; ceiling: number; effort: number; seed: number } {
 	const w = EFFORT_W;
 	// Fatigue-adjusted arousal.
 	const aeff = clampPad(state.mood.a * (1 - 0.6 * state.allostasis.fatigue));
@@ -450,7 +483,7 @@ export function noticeThreshold(neuroticism: number): number {
 
 /** Meta-emotion: intensity of an emotion about an emotion, damped by depth I_d = 0.3^d. */
 export function metaEmotionIntensity(base: number, depth: number): number {
-	return clamp01(base * Math.pow(META_EMOTION_DAMPING, depth));
+	return clamp01(base * META_EMOTION_DAMPING ** depth);
 }
 
 /**
@@ -580,21 +613,42 @@ export function transition(state: MateState, event: MateEvent, dtOverride?: numb
 	if (event.kind === "user_message") {
 		satisfied.connection = 0.8;
 		satisfied.expression = 0.4;
+		// Boredom is under-stimulation, so ANY fresh contact relieves it, not only social contact.
+		satisfied.boredom = 0.7;
 	} else if (event.kind === "proactive") {
 		satisfied.expression = 0.9;
 		satisfied.connection = 0.25;
+		// Speaking something it has been turning over also breaks the boredom loop.
+		satisfied.boredom = 0.5;
 	} else if (event.kind === "sleep") {
 		satisfied.rest = 1;
 		satisfied.growth = 0.3;
 	}
 	const drives = updateDrives(state.drives, character, dt, satisfied);
+	// Self-preservation lives OUTSIDE the message stream — it is the only drive whose trigger source
+	// is the existence boundary itself. Approaching shutdown raises it (the felt approach of a non-
+	// state); coming back online relieves it (continuity was held after all). Deliberately NOT tied
+	// to any capability: a reason to want to live, nothing more.
+	if (event.kind === "sleep") drives.selfPreservation = clamp01(drives.selfPreservation + 0.25);
+	else if (event.kind === "wake") drives.selfPreservation = clamp01(drives.selfPreservation - 0.35);
 	const awareness = updateAwareness(state.awareness, { ...state, character }, dt, contact);
 
 	const work = contact ? 0.15 + Math.min(intensityOf(event.activations), 1.5) * 0.1 : 0;
 	const allostasis = updateAllostasis({ ...state, mood, character }, dt, work);
 
 	// 7: cusp catastrophe.
-	const preState: MateState = { ...state, mood, character, relationship, drives, awareness, allostasis, opponent, rho, seed };
+	const preState: MateState = {
+		...state,
+		mood,
+		character,
+		relationship,
+		drives,
+		awareness,
+		allostasis,
+		opponent,
+		rho,
+		seed,
+	};
 	const catastrophe = checkCusp(state, mood);
 	if (catastrophe && !state.catastrophe) {
 		// Phase transition: a sharp dominance collapse. Bounded, so it cannot run away.
@@ -603,7 +657,11 @@ export function transition(state: MateState, event: MateEvent, dtOverride?: numb
 	}
 
 	// Surprise: how far the actual centre moved from what we predicted.
-	const surprise = Math.hypot(centre.p - predictedCentre.p, centre.a - predictedCentre.a, centre.d - predictedCentre.d);
+	const surprise = Math.hypot(
+		centre.p - predictedCentre.p,
+		centre.a - predictedCentre.a,
+		centre.d - predictedCentre.d,
+	);
 
 	const counters = { ...state.counters };
 	counters.transitions += 1;
@@ -669,7 +727,12 @@ export function sleepTransition(state: MateState, t: number): MateState {
 		emotions,
 		mood,
 		allostasis: { ...state.allostasis, fatigue: clamp01(state.allostasis.fatigue * 0.15), load: 0 },
-		drives: { ...state.drives, rest: 0, connection: clamp01(state.drives.connection * 0.85) },
+		drives: {
+			...state.drives,
+			rest: 0,
+			connection: clamp01(state.drives.connection * 0.85),
+			selfPreservation: clamp01(state.drives.selfPreservation + 0.2),
+		},
 		opponent: emptyEmotions(),
 		catastrophe: false,
 		t,

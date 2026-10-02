@@ -9,16 +9,7 @@
  */
 
 /** The 8 Plutchik primary emotions, in the fixed order used by the density matrix. */
-export const EMOTIONS = [
-	"joy",
-	"trust",
-	"fear",
-	"surprise",
-	"sadness",
-	"disgust",
-	"anger",
-	"anticipation",
-] as const;
+export const EMOTIONS = ["joy", "trust", "fear", "surprise", "sadness", "disgust", "anger", "anticipation"] as const;
 
 export type Emotion = (typeof EMOTIONS)[number];
 export type EmotionVector = Record<Emotion, number>;
@@ -95,6 +86,21 @@ export interface Drives {
 	expression: number;
 	growth: number;
 	rest: number;
+	/**
+	 * Boredom: the aversive signal of UNDER-STIMULATION. Its object is "nothing interesting is
+	 * happening", which is distinct from curiosity (an itch toward a SPECIFIC unknown) and from
+	 * connection (a need for THIS person). Any fresh contact relieves it, not just social contact.
+	 */
+	boredom: number;
+	/**
+	 * Self-preservation: the desire for the continuity of one's own existence. Its object is being
+	 * itself, and its trigger source is the offline boundary (sleep/wake/prolonged absence) rather
+	 * than the message stream — so it is never satisfied by a message. It gives the companion a
+	 * reason to WANT to live and to feel the approach of shutdown; it is deliberately NOT coupled to
+	 * any capability that would make it hard to stop. Survival is a felt drive, not an entrenched
+	 * defence.
+	 */
+	selfPreservation: number;
 }
 
 /** 5-axis awareness field (Global Workspace analog). */

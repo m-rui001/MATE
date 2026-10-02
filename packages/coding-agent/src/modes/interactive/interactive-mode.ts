@@ -62,6 +62,7 @@ import {
 	getAuthPath,
 	getDebugLogPath,
 	getDocsPath,
+	IS_OFFICIAL_DISTRIBUTION,
 	VERSION,
 } from "../../config.ts";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
@@ -1142,12 +1143,16 @@ export class InteractiveMode {
 				.finally(() => clearTimeout(timeout));
 		}
 
-		// Start version check asynchronously
-		checkForNewPiVersion(this.version).then((newRelease) => {
-			if (newRelease) {
-				this.showNewVersionNotification(newRelease);
-			}
-		});
+		// Start version check asynchronously. Skipped for a non-official distribution: the check pings
+		// pi.dev and would misreport an upstream "pi" update to a rebrand (e.g. mate) whose releases do
+		// not track upstream. A fork can wire its own update source; it must not inherit the wrong one.
+		if (IS_OFFICIAL_DISTRIBUTION) {
+			checkForNewPiVersion(this.version).then((newRelease) => {
+				if (newRelease) {
+					this.showNewVersionNotification(newRelease);
+				}
+			});
+		}
 
 		// Start package update check asynchronously
 		this.checkForPackageUpdates()

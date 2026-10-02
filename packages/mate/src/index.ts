@@ -10,21 +10,25 @@
  *   - state:   birth, sanitiseState, MateState and friends
  *   - kernel:  transition (the pure function), sleepTransition, effort/energy/burst models
  *   - offline: catchUp, verifySubdivisionInvariance, crossedSleepWindows
- *   - context: stateContext / minimalContext (the ~53-token projection)
- *   - autonomy: tick, shouldReply, generateThoughts, preSendReview, sendStyle
+ *   - context: stableContext (cached prefix) / stateContext (volatile per-turn tail)
+ *   - autonomy: tick, replyInclination, generateThoughts, preSendReview, sendStyle
  *   - secrets: loadKey, seal/unseal, publicView, sealedHints
+ *   - memory:  the associative graph — tokenise/encode/recall/consolidate/summary
+ *   - session: the open/close autobiographical log — openSession/closeSession/sessionSummary
  *   - quantum: the density-matrix helpers, exposed for tests and introspection
  *   - store:   load/save with atomic writes
  */
 
-export * from "./types.ts";
-export * from "./params.ts";
-export * from "./rng.ts";
-export * from "./quantum.ts";
 export * from "./birth.ts";
-export * from "./kernel.ts";
 export * from "./catchup.ts";
 export * from "./context.ts";
 export * from "./daemon.ts";
+export * from "./kernel.ts";
+export * from "./memory.ts";
+export * from "./params.ts";
+export * from "./quantum.ts";
+export * from "./rng.ts";
 export * from "./secret.ts";
+export * from "./session.ts";
 export * from "./store.ts";
+export * from "./types.ts";

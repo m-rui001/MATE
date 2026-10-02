@@ -6,10 +6,12 @@
  *     elapsed while the machine was OFF, in closed form (see mate/catchup.ts). This is the whole point
  *     of the fork: a companion that wakes having actually lived through the night.
  *   - Appraisal -> transition -> persist, once per inbound user message. The kernel is a pure function;
- *     this module is the impure shell that feeds it real events and saves the result atomically.
- *   - The reply decision. shouldReply() is the "may not reply / may reply later" requirement. This
- *     module turns that decision into pi actions (suppress, delay, continue) WITHOUT itself composing
- *     any words - the model does that.
+ *     this module is the impure shell that feeds it real events and saves the result atomically. Each
+ *     inbound message is also folded into the associative memory graph (P4), which grounds later thinking.
+ *   - The reply lean. Per P1 ("减少内置模式"), the kernel no longer gates replies. `replyInclination`
+ *     returns an ADVISORY signal that the model reads and may overrule; the model, not this code,
+ *     decides whether to answer, answer briefly, or let it sit. The `context` projection surfaces the
+ *     lean so it is felt, not enforced.
  *   - The proactive loop. A heartbeat that only runs while the process is alive and idle. It produces
  *     an IMPULSE (a thought the companion wants to voice), never an action. Reaching out over email or
  *     any other channel is something the model discovers it can do with bash/MCP - deliberately not
@@ -26,23 +28,37 @@ import { join } from "node:path";
 import {
 	birth,
 	catchUp,
+	closeSession,
+	consolidate,
 	type EmotionVector,
+	emptyMemory,
+	emptySessions,
+	encode,
 	gapLabel,
 	type ImpulseDecision,
 	type Intent,
 	load,
 	type MateState,
+	type MemoryGraph,
 	minimalContext,
+	nodeKey,
+	openSession,
 	type Persisted,
 	type PreSendChecks,
 	publicView,
+	type RecallHit,
+	type ReplyInclination,
+	recall,
+	replyInclination,
 	save,
 	seal,
-	shouldReply,
+	sessionSummary,
+	stableContext,
 	stateContext,
 	type Thought,
 	tick,
 	tickEvent,
+	tokenise,
 	transition,
 } from "@earendil-works/pi-mate";
 import { getAgentDir } from "../../config.ts";
@@ -66,21 +82,14 @@ export interface RuntimeOptions {
 	onError?: (err: unknown) => void;
 }
 
-/** The last inbound appraisal, so before_agent_start can inject matching context for THIS message. */
-interface PendingInbound {
-	text: string;
-	appraisal: AppraisalResult;
-	t: number;
-}
-
 export class MateRuntime {
 	private persisted: Persisted;
 	private dir: string;
+	private name: string;
 	private tz: string;
 	private onError: (err: unknown) => void;
 	private streaming = false;
 	private heartbeat: ReturnType<typeof setInterval> | null = null;
-	private pendingInbound: PendingInbound | null = null;
 	private lastCatchUpNote = "";
 	private booted = false;
 	/** Snapshot of the state immediately before the last user message was appraised. `refine` replays
@@ -91,9 +100,15 @@ export class MateRuntime {
 	/** Channels the model has told us about (e.g. it set up its own email). Not used by us directly;
 	 * surfaced back into context so the companion remembers it has them. */
 	private discoveredChannels: string[] = [];
+	/** The advisory reply lean computed for the pending inbound message (P1), surfaced in the volatile
+	 * state block; the model may ignore it. Cleared once consumed. */
+	private inclination: ReplyInclination | null = null;
+	/** Memories the last inbound message recalled (P4), surfaced ephemerally in the volatile block. */
+	private lastRecall: RecallHit[] = [];
 
 	constructor(opts: RuntimeOptions = {}) {
 		this.dir = opts.dir ?? join(getAgentDir(), "mate");
+		this.name = opts.name ?? "mate";
 		this.tz = opts.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "local";
 		this.onError = opts.onError ?? (() => {});
 		try {
@@ -104,6 +119,8 @@ export class MateRuntime {
 			this.persisted = {
 				state: birth({ name: opts.name }),
 				sealed: { version: 1, entries: [] },
+				memory: emptyMemory(),
+				sessions: emptySessions(),
 				key: Buffer.alloc(32),
 				dir: this.dir,
 				foreign: false,
@@ -114,6 +131,30 @@ export class MateRuntime {
 	/** The live state. Read-only by convention; mutate only via applyEvent. */
 	get state(): MateState {
 		return this.persisted.state;
+	}
+
+	/** The live memory graph. Read-only; mutated only via encode/consolidate here. */
+	get memory(): MemoryGraph {
+		return this.persisted.memory;
+	}
+
+	/**
+	 * The STABLE, cacheable identity+character+memory-graph block (P5). Goes into a cached system-prompt
+	 * section on before_agent_start. It depends only on slow-moving state, so its text is stable across
+	 * long stretches — which is exactly what prompt caching wants.
+	 */
+	stableContext(): string {
+		try {
+			return stableContext(this.state, { name: this.name, memory: this.persisted.memory });
+		} catch (err) {
+			this.onError(err);
+			return "";
+		}
+	}
+
+	/** Whether this state dir was born on another machine (sealed self is inert). */
+	get foreign(): boolean {
+		return this.persisted.foreign;
 	}
 
 	// ---------------------------------------------------------------------------
@@ -129,13 +170,21 @@ export class MateRuntime {
 		this.booted = true;
 		try {
 			const before = this.state.t;
-			const { state, report } = catchUp(this.state, undefined, Date.now());
-			this.persisted = { ...this.persisted, state };
+			const now = Date.now();
+			const { state, report } = catchUp(this.state, undefined, now);
+			// Sleep consolidates memory too: decay/prune the graph once per wake (P4). This mirrors the
+			// kernel's sleep windows — a companion that was off for three days forgets the trivia and
+			// keeps the things that were reinforced, the way the affective state integrates the gap.
+			const memory = consolidate(this.persisted.memory);
+			// Record that THIS body just opened. If the last mark never closed (crash / killed terminal),
+			// openSession seals it at `now`, so the log stays honest about the comings and goings.
+			const sessions = openSession(this.persisted.sessions, now);
+			this.persisted = { ...this.persisted, state, memory, sessions };
 			if (report.gapMs >= CATCHUP_NOTE_MS) {
 				this.lastCatchUpNote = `You were offline for ${report.gapLabel} and just woke up. ${report.sleeps.length} sleep${report.sleeps.length === 1 ? "" : "s"} consolidated.`;
 			}
 			this.persistSafe();
-			return { caughtUp: report.transitions > 0, gapMs: Date.now() - before, note: this.lastCatchUpNote };
+			return { caughtUp: report.transitions > 0, gapMs: now - before, note: this.lastCatchUpNote };
 		} catch (err) {
 			this.onError(err);
 			return { caughtUp: false, gapMs: 0, note: "" };
@@ -165,6 +214,22 @@ export class MateRuntime {
 		}
 	}
 
+	/**
+	 * This body is closing (session_shutdown). Seal the open mark so the log records WHEN it stopped —
+	 * the requirement that the companion knows when it was opened and when it was put down. The last
+	 * self_observation advances the clock one final time so the next wake's catch-up measures the true
+	 * offline span from the moment of closing, not from the last message.
+	 */
+	sleep(): void {
+		try {
+			const now = Date.now();
+			this.persisted = { ...this.persisted, sessions: closeSession(this.persisted.sessions, now) };
+			this.persistSafe();
+		} catch (err) {
+			this.onError(err);
+		}
+	}
+
 	// ---------------------------------------------------------------------------
 	// Streaming state (guards proactive outreach so we never talk over a running turn)
 	// ---------------------------------------------------------------------------
@@ -174,17 +239,19 @@ export class MateRuntime {
 	}
 
 	// ---------------------------------------------------------------------------
-	// Inbound: appraisal -> transition -> reply decision
+	// Inbound: appraisal -> transition -> memory encode -> advisory lean
 	// ---------------------------------------------------------------------------
 
 	/**
-	 * Handle an inbound USER message. Appraises it, advances the affective state, persists, and returns
-	 * the reply decision. Does NOT compose a reply. The extension turns the decision into pi actions.
+	 * Handle an inbound USER message. Appraises it, advances the affective state, folds it into the
+	 * memory graph, and computes what the message stirred up. Returns an ADVISORY reply lean and the
+	 * recalled memories — it makes no reply/drop/delay decision. Per P1, the model decides whether to
+	 * answer, answer briefly, or let it sit, reading this in the context block. Does NOT compose a reply.
 	 */
 	onUserMessage(text: string): {
 		appraisal: AppraisalResult;
-		decision: { reply: boolean; delayMs: number; reason: string };
-		impulse: ImpulseDecision;
+		inclination: ReplyInclination;
+		recall: RecallHit[];
 	} {
 		const now = Date.now();
 		const appraisal = appraise(text);
@@ -200,37 +267,50 @@ export class MateRuntime {
 				text,
 				t: now,
 			});
-			// Remember it so before_agent_start injects context matched to this message.
-			this.pendingInbound = { text, appraisal, t: now };
 
-			const sinceLastReply = now - this.state.lastInteraction;
-			const decision = shouldReply(this.state, appraisal.weight, { now, sinceLastReplyMs: sinceLastReply });
+			// P4: encode this episode into the graph. The PAD pleasantness becomes the valence on the
+			// edges this message co-activates, so being associated with something unpleasant leaves a
+			// negative trace — the memory is affective, not just factual.
+			this.persisted = {
+				...this.persisted,
+				memory: encode(this.persisted.memory, {
+					text,
+					pad: this.state.mood,
+					t: now,
+				}),
+			};
 
-			// If we are going to answer, the unanswered streak ends here.
-			if (decision.reply && decision.delayMs === 0) {
-				this.noteReplied();
-			} else if (!decision.reply) {
-				this.noteWithheld();
-			}
+			// Recall: seed from this message's own tokens and spread activation. Surfaced ephemerally.
+			const seeds = tokenise(text).map(nodeKey);
+			const rec = recall(this.persisted.memory, { seeds, now, limit: 6 });
+			this.lastRecall = rec;
 
-			const impulse = this.computeImpulse(now, true);
-			return { appraisal, decision, impulse };
+			// P1: an advisory lean, not a gate. Nothing here suppresses the turn; the model reads it in
+			// the next context block (consumed once by takePendingSignal).
+			const inclination = replyInclination(this.state, appraisal.weight);
+			this.inclination = inclination;
+
+			this.persistSafe();
+			return { appraisal, inclination, recall: rec };
 		} catch (err) {
 			this.onError(err);
-			// On any failure, default to replying normally - never strand the user.
+			// On any failure, stay neutral: no lean, no recall — the model just replies as itself.
+			this.inclination = null;
+			this.lastRecall = [];
 			return {
 				appraisal,
-				decision: { reply: true, delayMs: 0, reason: "fallback" },
-				impulse: { action: "stay_silent", reason: "error" },
+				inclination: { value: 0, lean: "open", reason: "steady" },
+				recall: [],
 			};
 		}
 	}
 
-	/** Consume the pending inbound (so before_agent_start injects once). */
-	takePendingInbound(): PendingInbound | null {
-		const p = this.pendingInbound;
-		this.pendingInbound = null;
-		return p;
+	/** The advisory lean + recall for the pending inbound, consumed once per turn by the context block. */
+	takePendingSignal(): { inclination: ReplyInclination | null; recall: RecallHit[] } {
+		const out = { inclination: this.inclination, recall: this.lastRecall };
+		this.inclination = null;
+		this.lastRecall = [];
+		return out;
 	}
 
 	/**
@@ -249,7 +329,8 @@ export class MateRuntime {
 				t - base.t,
 			);
 			this.persisted = { ...this.persisted, state: r.state };
-			// The refine only re-reads affect; the reply decision already taken stands.
+			// The refine re-reads affect and may add a sealed note; it does not change any reply choice
+			// (there is no gate — the model already owns that).
 			if (note?.trim()) this.sealJournal(note);
 			this.persistSafe();
 		} catch (err) {
@@ -257,11 +338,22 @@ export class MateRuntime {
 		}
 	}
 
-	/** The companion chose to say something on its own initiative; expression is satisfied. */
+	/** The companion chose to say something on its own initiative; expression is satisfied. This also
+	 * opens an "unanswered overture" streak — reset the next time the user actually replies. With the
+	 * inbound gate removed (P1), unanswered now counts only our OWN proactive messages left hanging,
+	 * which is exactly what preSendReview uses to keep the companion from chasing silence forever. */
 	noteProactiveSent(thought?: Thought): void {
 		try {
 			this.applyEvent({ kind: "proactive", activations: {}, intensity: 0.3, intent: "chat", t: Date.now() });
+			this.persisted = {
+				...this.persisted,
+				state: {
+					...this.state,
+					relationship: { ...this.state.relationship, unanswered: this.state.relationship.unanswered + 1 },
+				},
+			};
 			if (thought) this.sealEntry("journal", `reached out: ${thought.text}`, thought.topic);
+			this.persistSafe();
 		} catch (err) {
 			this.onError(err);
 		}
@@ -303,16 +395,31 @@ export class MateRuntime {
 	}
 
 	// ---------------------------------------------------------------------------
-	// Context projection (token-lean)
+	// Context projection
 	// ---------------------------------------------------------------------------
 
-	/** The full state context, ~73 tokens. Injected once per user turn. */
+	/**
+	 * The VOLATILE per-turn state block. Identity/character/memory-graph summary are NOT here — they
+	 * live in the cached `stableContext()` prefix (P5). This is the always-fresh delta: clock, mood,
+	 * drives, the advisory reply lean and the memories this last message recalled (P1/P4). Injected
+	 * ephemerally via the `context` event so it never bloats the prompt cache.
+	 */
 	context(now = Date.now(), opts: { minimal?: boolean } = {}): string {
 		try {
 			const gapNote = this.lastCatchUpNote ? gapLabel(now - this.state.lastInteraction) : undefined;
-			const body = opts.minimal
-				? minimalContext(this.state, { now, tz: this.tz, gapLabel: gapNote })
-				: stateContext(this.state, { now, tz: this.tz, gapLabel: gapNote });
+			if (opts.minimal) {
+				return minimalContext(this.state, { now, tz: this.tz, gapLabel: gapNote });
+			}
+			// Consume the lean + recall computed for the pending inbound, matched to THIS message.
+			const signal = this.takePendingSignal();
+			const body = stateContext(this.state, {
+				now,
+				tz: this.tz,
+				gapLabel: gapNote,
+				inclination: signal.inclination ?? undefined,
+				recall: signal.recall.length ? signal.recall : undefined,
+				session: sessionSummary(this.persisted.sessions, now) || undefined,
+			});
 			// Surface discovered channels so the companion remembers what it set up for itself.
 			const channels = this.discoveredChannels.length
 				? `\nchannels you set up: ${this.discoveredChannels.join(", ")}`
@@ -321,7 +428,10 @@ export class MateRuntime {
 			const secrets = sealedCount
 				? `\nyou keep ${sealedCount} private note${sealedCount === 1 ? "" : "s"} (sealed; not shown to the user)`
 				: "";
-			return `${body}${channels}${secrets}`;
+			const foreign = this.persisted.foreign
+				? "\nthis body was woken on a different machine — your sealed memories are inaccessible here"
+				: "";
+			return `${body}${channels}${secrets}${foreign}`;
 		} catch (err) {
 			this.onError(err);
 			return "";
@@ -380,7 +490,8 @@ export class MateRuntime {
 			recentTopics: [],
 			coldEnding: this.state.relationship.frustration > 0.5,
 		};
-		return tick(this.state, now, checks);
+		// Pass the graph so thoughts are GROUNDed in real memories (P4), not free-floating mood.
+		return tick(this.state, now, checks, this.persisted.memory);
 	}
 
 	/** How many proactive messages in the last hour. We track this in-process; the counter survives in
@@ -401,17 +512,6 @@ export class MateRuntime {
 				state: { ...this.state, relationship: { ...this.state.relationship, unanswered: 0 } },
 			};
 		}
-	}
-
-	private noteWithheld(): void {
-		this.persisted = {
-			...this.persisted,
-			state: {
-				...this.state,
-				relationship: { ...this.state.relationship, unanswered: this.state.relationship.unanswered + 1 },
-			},
-		};
-		this.persistSafe();
 	}
 
 	/**

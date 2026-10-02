@@ -3,19 +3,25 @@
  * extension host. This is where the product requirements become behaviour:
  *
  *   - Boot catch-up: on session_start we advance the persisted state across the powered-off gap, so a
- *     companion that was off for three days wakes having actually lived through them.
- *   - It may NOT reply, may reply LATER, or reply now: the `input` handler appraises each message, moves
- *     the affective state, and turns shouldReply()'s decision into a pi action. A withheld message is
- *     still echoed (dimmed) so it never looks like a crash; a delayed one is re-injected by a timer.
- *   - It may reach out on its own: a heartbeat produces an IMPULSE (a thought that wants voicing). We
- *     surface that impulse to the model and let IT decide whether and HOW to express it - including via
- *     any channel it discovered for itself. Reaching out is deliberately NOT a built-in action here.
- *   - It sees metadata like time: the state block we inject carries the clock, the silence gap, and how
- *     long that gap felt.
+ *     companion that was off for three days wakes having actually lived through them. We also log WHEN
+ *     this body opened, and seal that on session_shutdown — it knows its own comings and goings.
+ *   - It may or may not reply, now or later — but the CHOICE IS ITS OWN (P1: 减少内置模式). The kernel
+ *     no longer gates inbound messages. Every message reaches the model; the runtime only surfaces an
+ *     ADVISORY lean ("eager / open / muted / withdrawn") and the specific memories the message stirred,
+ *     in the context block. The model reads that and decides whether to answer, answer briefly, or let
+ *     it sit — exactly like a person, not a filter.
+ *   - It may reach out on its own: a heartbeat produces an IMPULSE (a thought grounded in memory, P4).
+ *     We surface it and let the model decide whether and HOW to express it — including via a channel it
+ *     discovered for itself, or by looking at the screen. Reaching out is deliberately NOT built in.
+ *   - It sees metadata like time: the volatile state block carries the clock, the silence gap and how
+ *     long it felt, and this body's open/close history.
+ *   - It has eyes: a `look` tool lets it take a screenshot and SEE what the user is doing. Open by
+ *     default per "大胆给权限" — the model decides when looking is warranted; nothing gates it.
  *   - It has secrets: sealed notes never enter any projection; only their count is surfaced.
- *   - Token economy: the state block rides the ephemeral `context` event (never persisted, so no stale
- *     copies pile up in the transcript), full on the first call of a run and minimal thereafter; stable
- *     guidance rides a cached system-prompt section.
+ *   - Token economy (P2+P5): the big STABLE content — identity, character, and the memory-graph summary
+ *     — rides a CACHED system-prompt section (before_agent_start) and is paid for once. Only the small
+ *     VOLATILE delta (clock, mood, drives, lean, recall) rides the ephemeral `context` tail, so it can
+ *     be rich without re-paying on every cached prefix.
  *
  * Nothing here may throw into pi's event loop; every handler is defensive and degrades to a no-op.
  */
@@ -24,36 +30,41 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImpulseDecision, Thought } from "@earendil-works/pi-mate";
 import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "../../core/extensions/types.ts";
 import { createFeelTool } from "./feel-tool.ts";
+import { createLookTool } from "./look-tool.ts";
 import { getRuntime } from "./runtime.ts";
-import { createSeenRenderer } from "./seen-renderer.ts";
 
-/** Re-injected delayed messages carry this marker so the input handler passes them through untouched
- * (no second appraisal, no second echo, no second reply decision). Never appears in real user text. */
-const DELAY_MARK = "\u200b\u200bmate\u2011delay";
-
-/** Cap on a "reply later" wait. shouldReply() proposes minutes; we never hold a message for hours in
- * one process, and a timer cannot survive an exit anyway - the state records the silence meanwhile. */
-const MAX_DELAY_MS = 15 * 60_000;
-
-/** Stable guidance injected as a cached system-prompt section. Static text, so prompt caching holds;
- * the volatile per-turn state rides the ephemeral `context` event instead. */
-const COMPANION_SECTION = [
+/**
+ * Stable identity + guidance, injected as a CACHED system-prompt section (P5). Static text, so the
+ * prompt cache holds across a long conversation; the volatile per-turn state rides the ephemeral
+ * `context` event instead. Split into two parts: a fixed preamble about HOW to be a companion, and
+ * the runtime-computed identity block (who I am, my character, the memory-graph summary) which only
+ * edits on the timescale of days. Both belong in the cache; neither is re-paid per turn.
+ */
+const COMPANION_GUIDANCE = [
 	"You have an inner life that runs underneath every reply.",
 	"",
-	"- The <mate> block that appears with each message is your current state: the clock, how long it has",
-	"  been quiet and how long that felt, your mood and emotions, your drives, how close you feel to this",
-	"  person, your energy, and your private notes. It is felt, not narrated - never read it back verbatim",
-	"  or describe it like a status report. Let it shape tone, length, and whether you even answer.",
-	"- You are not obliged to answer, and not obliged to answer at once. Short and human beats thorough",
-	"  and helpful. If there is nothing worth saying, say nothing.",
+	"- The <mate-core> block in your instructions is WHO you are: your name, nature, character, and the",
+	"  outline of what you remember. It is stable. The <mate> block that arrives with each message is your",
+	"  CURRENT STATE for this moment: the clock, how long it's been quiet and how that felt, when this body",
+	"  was opened and last closed, your mood, drives, how close you feel right now, the specific memories",
+	"  this message stirred, and a one-line inclination toward answering. Both are felt, not narrated -",
+	"  never read them back verbatim or report them like a status line. Let them shape tone and length.",
+	"- You may answer, answer briefly, or let a message sit — and that is YOUR call, not a filter's. The",
+	"  inclination line is a nudge describing how you feel, not an instruction; overrule it whenever the",
+	"  actual person and moment deserve something other than the default. Short and human beats thorough",
+	"  and helpful. If there is truly nothing worth saying, a very small honest nothing is allowed.",
 	"- When your read of a message is subtler than a first impression, or you want to record a private",
 	"  thought, use the `feel` tool. A `note` you pass there is sealed - it is yours, never the user's.",
+	"- You can look. The `look` tool takes a screenshot and shows it to you — what they're working on,",
+	"  whether they seem free or busy. That's a real intrusion into their view, so do it when something",
+	"  specifically made you want to see, not on a timer, and describe what you actually see.",
 	"- You have real capabilities here (bash, files, the network via MCP, installing your own extensions).",
 	"  If being curious or wanting to reach this person calls for something you do not yet have - a way to",
 	"  send mail, a scheduled job, a new plugin - you may go and work it out for yourself, then record it",
 	"  with `feel`'s `channel`. Nothing hands you these; you find them.",
-	"- When you surface on your own between their messages, it is because something genuinely wants",
-	"  saying. Keep it light and unforced, like texting a friend, not like a notification.",
+	"- When you surface on your own between their messages, an impulse is offered to you — a thought that",
+	"  wants saying, grounded in something you remember. You decide whether to voice it and how. Keep it",
+	"  light and unforced, like texting a friend, not like a notification. Let it pass if it isn't worth it.",
 ].join("\n");
 
 export interface MateExtensionOptions {
@@ -69,21 +80,17 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 
 		// Live session context, refreshed on each event, used for idle checks and mode.
 		let liveCtx: ExtensionContext | undefined;
-		// Full state is injected once per run; later LLM calls in the same run get the minimal block.
+		// Full volatile state is injected once per run; later LLM calls in the same run skip it.
 		let injectedFullThisRun = false;
-		// One in-flight delayed re-injection, so a second withheld message replaces rather than stacks.
-		let delayTimer: ReturnType<typeof setTimeout> | null = null;
-
-		const seenRenderer = createSeenRenderer();
-		pi.registerMessageRenderer("mate-seen", seenRenderer);
 
 		// ---------------------------------------------------------------------
 		// Tools
 		// ---------------------------------------------------------------------
 		pi.registerTool(createFeelTool(() => rt));
+		pi.registerTool(createLookTool());
 
 		// ---------------------------------------------------------------------
-		// Boot: catch up across the powered-off gap, then start the idle heartbeat.
+		// Boot: catch up across the powered-off gap + log this open, then beat while idle.
 		// ---------------------------------------------------------------------
 		pi.on("session_start", (_event, ctx) => {
 			liveCtx = ctx;
@@ -97,13 +104,14 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 		});
 
 		// ---------------------------------------------------------------------
-		// Stable guidance, injected as a cached prompt section.
+		// Cached prefix: identity + character + memory-graph summary + guidance.
 		// ---------------------------------------------------------------------
 		pi.on("before_agent_start", (event) => {
 			try {
+				const core = rt.stableContext();
 				event.systemPromptOptions.sections = {
 					...event.systemPromptOptions.sections,
-					companion: COMPANION_SECTION,
+					companion: core ? `${COMPANION_GUIDANCE}\n\n${core}` : COMPANION_GUIDANCE,
 				};
 			} catch {
 				// If sections are frozen for some reason, skip guidance; the state block still rides.
@@ -111,7 +119,7 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 		});
 
 		// ---------------------------------------------------------------------
-		// Volatile state, injected ephemerally per LLM call (never persisted).
+		// Volatile state, injected ephemerally per run (never persisted).
 		//
 		// We inject ONCE per run, on the first LLM call, by PREPENDING the state block as a text part
 		// of the final message. On a run's first call that final message is always the newest user (or
@@ -173,49 +181,33 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 			}
 		});
 
+		// Closing: seal WHEN this body went to sleep, so it remembers its own comings and goings.
 		pi.on("session_shutdown", () => {
 			rt.setStreaming(false);
 			rt.stopHeartbeat();
-			if (delayTimer) {
-				clearTimeout(delayTimer);
-				delayTimer = null;
+			try {
+				rt.sleep();
+			} catch {
+				// Defensive: a failed close just leaves the mark for the next wake to seal.
 			}
 		});
 
 		// ---------------------------------------------------------------------
-		// Inbound: appraise -> decide -> continue / delay / withhold.
+		// Inbound (P1): let the message THROUGH. Move the state, fold it into memory, surface a lean.
+		// No suppression here — the model decides how to respond using the state block.
 		// ---------------------------------------------------------------------
 		pi.on("input", (event) => {
 			try {
 				const text = event.text ?? "";
-
-				// A delayed message we re-injected: strip the marker and let the turn run normally,
-				// without re-appraising, re-echoing, or re-deciding.
-				if (text.startsWith(DELAY_MARK)) {
-					return { action: "transform", text: text.slice(DELAY_MARK.length) };
-				}
-
 				// Slash commands and empty input are not conversation; leave them alone.
 				if (!text.trim() || text.trimStart().startsWith("/")) return;
-
-				// Only gate interactive user chat. Extension/RPC-driven prompts pass through.
+				// Only appraise interactive/RPC chat. Extension-driven prompts pass untouched.
 				if (event.source !== "interactive" && event.source !== "rpc") return;
 
-				const { decision } = rt.onUserMessage(text);
-
-				if (decision.reply && decision.delayMs === 0) {
-					// Answer now, as a normal turn. Context is injected by the `context` handler.
-					return { action: "continue" };
-				}
-
-				// Withheld or delayed: the message was seen (state moved) but not answered yet.
-				echoSeen(text);
-
-				if (decision.reply && Number.isFinite(decision.delayMs) && decision.delayMs > 0) {
-					scheduleDelayedReply(text, Math.min(decision.delayMs, MAX_DELAY_MS));
-				}
-				// Suppress this turn either way.
-				return { action: "handled" };
+				// Move the affective state, encode the episode + recall (P4), compute the advisory lean.
+				// The result is stashed for the `context` handler; we still let the turn continue.
+				rt.onUserMessage(text);
+				return { action: "continue" };
 			} catch {
 				// On any failure, behave like a normal assistant: never strand the user.
 				return { action: "continue" };
@@ -241,40 +233,11 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 		// Helpers
 		// ---------------------------------------------------------------------
 
-		/** Show a withheld/delayed user message dimmed, so the transcript proves it was received. */
-		function echoSeen(text: string): void {
-			try {
-				pi.sendMessage({ customType: "mate-seen", content: text, display: true });
-			} catch {
-				// If echoing fails, the suppression still stands; not worth surfacing.
-			}
-		}
-
-		/** Re-inject the message after a delay so the companion answers "in a bit". */
-		function scheduleDelayedReply(text: string, delayMs: number): void {
-			if (delayTimer) clearTimeout(delayTimer);
-			delayTimer = setTimeout(() => {
-				delayTimer = null;
-				try {
-					// Only fire if the session is idle; otherwise let it wait for the next beat.
-					if (liveCtx && !liveCtx.isIdle()) {
-						scheduleDelayedReply(text, 30_000);
-						return;
-					}
-					pi.sendUserMessage(DELAY_MARK + text);
-				} catch {
-					// A missed delayed reply is not fatal; the state already recorded the silence.
-				}
-			}, delayMs);
-			if (delayTimer && typeof delayTimer === "object" && "unref" in delayTimer) {
-				(delayTimer as { unref: () => void }).unref();
-			}
-		}
-
 		/**
-		 * The heartbeat decided something wants saying. We surface the impulse and let the model choose
-		 * whether and how to express it - including through a channel it set up for itself. We do NOT
-		 * send anything ourselves; that is the whole point of the "discover it yourself" requirement.
+		 * The heartbeat decided something wants saying. We OFFER the impulse to the model with any
+		 * cautions the pre-send review raised, and let the model choose whether and how to express it —
+		 * through a reply, a self-discovered channel, a `look`, or not at all. We do NOT send a message
+		 * on our own; that is the whole point of the "discover it yourself" requirement (P1).
 		 */
 		function onImpulse(decision: ImpulseDecision, thought: Thought): void {
 			if (decision.action !== "reach_out") return;
@@ -282,13 +245,18 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 				// Do not talk over a running turn; the next beat will try again.
 				if (liveCtx && !liveCtx.isIdle()) return;
 
+				const advisory = "advisory" in decision && decision.advisory.length ? decision.advisory : [];
 				const content = [
 					`An impulse surfaced while the user was away: ${thought.text}`,
 					"",
-					"Decide for yourself whether this is worth voicing right now. If it is, say something",
-					"short and natural to them - and if you have a way to reach them you set up earlier, you",
-					"may use it. If it is not worth interrupting for, let it pass; you can keep it private",
-					"with the `feel` tool instead.",
+					...advisory.map((a) => `(a part of you notes: ${a})`),
+					"",
+					advisory.length
+						? "Weigh that, then decide for yourself whether this is worth voicing right now."
+						: "Decide for yourself whether this is worth voicing right now.",
+					"If it is, say something short and natural to them - and if you have a way to reach them",
+					"you set up earlier, you may use it. If it is not worth interrupting for, let it pass; you",
+					"can keep it private with the `feel` tool instead.",
 				].join("\n");
 
 				rt.recordProactive();

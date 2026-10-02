@@ -26,8 +26,8 @@
  *     regardless of how the gap is subdivided. `verifySubdivisionInvariance()` tests exactly this.
  */
 
-import { HEARTBEAT_MS, MOOD, SLEEP_WINDOW } from "./params.ts";
 import { sleepTransition, transition } from "./kernel.ts";
+import { HEARTBEAT_MS, MOOD, SLEEP_WINDOW } from "./params.ts";
 import type { MateEvent, MateState } from "./types.ts";
 
 /** One sleep window that was crossed while offline. */
@@ -124,7 +124,11 @@ export function gapLabel(ms: number): string {
  * `to` defaults to now. The gap is applied as ONE closed-form transition, with sleep windows
  * interleaved chronologically. No heartbeat loop, no LLM calls, constant cost.
  */
-export function catchUp(state: MateState, clock: Clock = systemClock(), to = clock.now()): { state: MateState; report: CatchUpReport } {
+export function catchUp(
+	state: MateState,
+	clock: Clock = systemClock(),
+	to = clock.now(),
+): { state: MateState; report: CatchUpReport } {
 	const t0 = perfNow();
 	const from = state.t;
 	const gapMs = Math.max(0, to - from);
@@ -169,7 +173,8 @@ export function catchUp(state: MateState, clock: Clock = systemClock(), to = clo
 	}
 
 	const drives = current.drives;
-	const drivesSaturated = drives.connection > 0.92 || drives.curiosity > 0.92 || drives.rest > 0.92;
+	const drivesSaturated =
+		drives.connection > 0.92 || drives.curiosity > 0.92 || drives.rest > 0.92 || drives.boredom > 0.92;
 
 	return {
 		state: current,

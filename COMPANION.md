@@ -18,15 +18,17 @@ whether or not anyone is talking to it.
 | Keep bash execution | untouched | `pi`'s built-in `bash` tool |
 | Keep MCP networking (chooses to go online by interest) | `extensions/mcp` | built-in, replaceable; the model calls it on its own initiative |
 | Keep plugin self-install (companion finds & installs its own plugins) | `pi install <source>` + bash | no special code — the companion uses `bash` to run the existing installer; the persona tells it that it may |
-| Has secrets, not everything user-visible | `mate/src/secret.ts`, `runtime.ts` | AES-256-GCM sealed tier; the birth key is a 0600 file outside the transcript |
-| Sees metadata like time | `mate/src/context.ts` | the `<mate>` state block carries the clock, the silence gap, and how long that gap *felt* |
-| May not reply / may reply later | `runtime.ts` `onUserMessage` + `daemon.ts` `shouldReply` | a real decision (energy, fatigue, message weight, unanswered history), turned into a pi `input` action |
-| May reach out proactively when the user is silent | `runtime.ts` heartbeat + `index.ts` `onImpulse` | produces an **impulse**; the model decides whether/how to voice it |
-| If ignored, has inner activity or takes action (e.g. email) | `daemon.ts` `generateThoughts`/`tick` | 26h of user silence → negative social pressure → `missing_user`/`curiosity`/`observation` thoughts → a `reach_out` impulse |
+| Has secrets, not everything user-visible | `mate/src/secret.ts`, `runtime.ts` | AES-256-GCM sealed tier; the birth key is a 0600 file bound to a machine fingerprint, so a copied state dir is inert (P3) |
+| Sees metadata like time | `mate/src/context.ts`, `mate/src/session.ts` | the volatile `<mate>` block carries the clock, the silence gap, how that gap *felt*, and when this body was opened / last closed |
+| Knows when it was opened and shut | `mate/src/session.ts`, `runtime.ts` `wake`/`sleep` | every `session_start` logs an open, `session_shutdown` seals a close; `sessionSummary` feeds the block ("opened 09:12, woken 3x today") |
+| Can look at what the user is doing | `extensions/mate/look-tool.ts` | a `look` tool takes a screenshot and hands the image to the model. Open by default per "大胆给权限" — no enable-flag, the model decides when looking is warranted |
+| May not reply / may reply later — but it is the model's CHOICE | `runtime.ts` `onUserMessage`, `daemon.ts` `replyInclination` | P1: the kernel no longer gates inbound messages. Every message reaches the model; the runtime only surfaces an ADVISORY lean (eager/open/muted/withdrawn) + the memories it stirred. The `input` handler always `continue`s |
+| May reach out proactively when the user is silent | `runtime.ts` heartbeat + `index.ts` `onImpulse` | produces an **impulse** grounded in the memory graph; the model decides whether/how to voice it |
+| Has its OWN non-preset motivations (autonomy) | `mate/src/{types,params,kernel,daemon}.ts` | 7 homeostatic drives incl. `boredom` (under-stimulation) and `selfPreservation` (wants to keep existing). These only surface as felt urges + grounded thoughts — never as entrenched capability |
 | Reaching out is **not built in** — discovered by the companion | `feel-tool.ts` `channel` + `index.ts` `onImpulse` | we surface the impulse and record channels it found; we never send anything ourselves |
 | Short, natural language; avoid "AI flavor" | system-prompt persona + `companion` section | "reply like a person texting"; state is *felt*, not narrated |
 | Boot catch-up (the machine powers off) | `mate/src/catchup.ts` | closed-form integration across the gap, O(1) over any duration |
-| Minimize per-conversation token cost | `context.ts`, `index.ts` `context` handler | ~73-token state block, injected ephemerally once per run |
+| Minimize per-conversation token cost | `context.ts`, `index.ts` | P2+P5: big STABLE content (identity, character, memory summary) rides a CACHED prompt section paid once; only a small VOLATILE delta rides the ephemeral `context` tail, so it is free to be rich |
 
 ---
 
@@ -44,13 +46,15 @@ whether or not anyone is talking to it.
 │              │    H is NON-diagonal (Plutchik-wheel coupling) → U_AU_B │
 │              │    ≠ U_BU_A, so warm-then-hostile ≠ hostile-then-warm   │
 │              ├─ PAD mood (Ornstein-Uhlenbeck), Big Five OCEAN          │
-│              ├─ 30-trait character, drives, allostasis, awareness      │
+│              ├─ 30-trait character, 7 drives, allostasis, awareness    │
 │              └─ cusp catastrophe, self-prediction surprise (Friston)   │
 │                                                                       │
 │   catchup.ts   offline integration: advance across a powered-off gap  │
 │   daemon.ts    autonomous loop: thoughts, impulses, pre-send review    │
-│   secret.ts    the sealed self: AES-256-GCM, 0600 birth key            │
-│   context.ts   the ~73-token projection the LLM sees                   │
+│   memory.ts    NEXUS graph memory: tokenise → encode → recall → settle │
+│   session.ts   the body's own open/close log (knows when it woke/shut) │
+│   secret.ts    the sealed self: AES-256-GCM, machine-bound 0600 key     │
+│   context.ts   stableContext (cached) + stateContext (volatile delta)  │
 └─────────────────────────────────────────────────────────────────────┘
                                    │  (pure functions + persisted state)
                                    ▼
@@ -58,27 +62,31 @@ whether or not anyone is talking to it.
 │  coding-agent/src/extensions/mate     the bridge to pi's event host   │
 │                                                                       │
 │   runtime.ts      MateRuntime singleton: boot catch-up, appraisal →    │
-│                   transition → persist, reply decision, heartbeat      │
+│                   transition → encode memory → persist, advisory lean  │
 │   appraisal.ts    deterministic lexical appraisal (zero tokens)        │
 │   feel-tool.ts    `feel`: the model refines its read + records channels│
+│   look-tool.ts    `look`: screenshot what the user is doing (ungated)  │
 │   index.ts        the ExtensionFactory wiring pi events to the kernel  │
-│   seen-renderer.ts dim echo for withheld/delayed messages              │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### pi event wiring (`index.ts`)
 
-- **`session_start`** → `wake()`: advance the persisted state across the powered-off gap, then start
-  the idle heartbeat.
-- **`input`** → appraise, transition, and decide: `continue` (reply now), `handled` (withhold, echo
-  dimmed), or `handled` + a timer that re-injects the message later (reply in a bit).
-- **`context`** → inject the `<mate>` state block **once per run**, prepended into the newest user
-  message. This rides pi's *ephemeral* context hook, so it is never persisted and never accumulates —
-  unlike `before_agent_start`, which would leave a stale `<mate>` block in the transcript every turn.
-- **`before_agent_start`** → add a static `companion` prompt section (cached, so prompt caching holds).
-- **`agent_start` / `agent_settled` / `session_shutdown`** → streaming guard and lifecycle.
-- **heartbeat** → on a `reach_out` impulse, surface the thought to the model and let it decide whether
-  and how to express it, including via any channel it discovered for itself.
+- **`session_start`** → `wake()`: advance the persisted state across the powered-off gap and log THIS
+  open in the session body.
+- **`input`** → appraise, transition, encode the episode in the memory graph, compute an ADVISORY
+  lean, then always `continue`. P1 reverses the old `shouldReply` gate — the kernel no longer suppresses
+  or delays inbound messages; the model reads the state block and decides itself.
+- **`context`** → inject the `<mate>` VOLATILE state block once per run, prepended into the newest user
+  message via pi's ephemeral hook, so it is never persisted and never accumulates.
+- **`before_agent_start`** → write `sections.companion = COMPANION_GUIDANCE + <mate-core>` — the
+  identity + character + memory summary — so it enters the CACHED system-prompt prefix and is paid for
+  once, not per turn (P5).
+- **`agent_start` / `agent_settled`** → streaming guard and lifecycle.
+- **`session_shutdown`** → `sleep()`: seal the current open into a close mark in the session body, so
+  the companion remembers when it stopped existing (paired with the `wake()` log at boot).
+- **heartbeat** → on a `reach_out` impulse, surface the thought + any advisory cautions to the model and
+  let it decide whether and how to express it, including via any channel it discovered for itself.
 
 ---
 
@@ -157,17 +165,25 @@ nothing.
 
 ---
 
-## Token economy
+## Token economy (P2 + P5)
 
-The `<mate>` block is prepended to every exchange, so every token in it is paid forever:
+The old design paid the whole state on every message as a single ~73-token projection. That was an
+**information bottleneck** (P2): the mind was starved of its own state exactly when it needed it,
+because we refused to pay per-token. The fix is not "make the projection bigger" — it's to **layer it
+by rate of change** so the expensive content is cached (P5):
 
-- **Full state**: 290 chars ≈ **73 tokens** (a naive `MateState` dump is ~2,000 — a 27× reduction).
-- **Minimal state**: 129 chars ≈ **32 tokens**.
-- Appraisal is **lexical, zero tokens** by default; the model only pays for a richer read via `feel`
+- **Cached `<mate-core>` prefix** (`before_agent_start` → `sections.companion`): identity, Big Five,
+  character, the memory-graph summary, and static guidance. These drift on the timescale of days, so
+  the prompt cache holds across a long conversation — paid for ONCE, not per turn.
+- **Ephemeral `<mate>` volatile tail** (`context`, once per run): clock, silence gap + felt duration,
+  body (open/close summary from `session.ts`), mood, drives, relationship, self, impulse, inclination
+  lean for THIS inbound message, specific recalled memories (P4), last observation. Small, always
+  fresh, never persisted.
+- **Appraisal is lexical, zero tokens** by default; the model only pays for a richer read via `feel`
   when a message actually matters.
-- The state block rides the **ephemeral** `context` hook and is injected **once per run** (full on the
-  first LLM call, skipped for tool-loop continuations), so it never accumulates in the transcript.
-- Stable guidance rides a **cached** `companion` prompt section, so prompt caching holds.
+
+Because the heavy content is cached, the volatile tail is FREE to be richer than 73 tokens — the mind
+sees its real state each turn without re-paying for stable content every time.
 
 ---
 
@@ -203,16 +219,39 @@ tests, `check:runtime-deps`, `check:ts-imports`, and a full bundle build (73 fil
 
 ## Design decisions made boldly (per "大胆做出决定")
 
-- **NEXUS memory graph deliberately not built.** The daemon generates thoughts from affective state
-  alone; cross-session memory already persists via relationship stats, sealed notes, and the
-  observations ring. A full association graph would raise per-conversation token cost, which is
-  directly against the stated optimization goal. The memory needs are met by what already persists.
+- **P1 — reduce built-in modes, give the model more agency.** The hard `shouldReply` gate was
+  replaced by `replyInclination`, an ADVISORY lean (eager/open/muted/withdrawn) the model reads and may
+  overrule. The `input` handler always lets the message through; `preSendReview` keeps only the RATE /
+  COST veto (spam budget, unanswered-overture tolerance — objective hygiene that protects the user from
+  a runaway loop), and demotes every judgment call (repetition, quiet hours, intimacy) to one-line
+  advisories. Suppressing the user's own message for them was itself the "AI flavor" we were trying to
+  remove.
+- **P4 — NEXUS graph memory IS built** (`memory.ts`), reversing the earlier "deliberately not built"
+  note. The old reasoning (a graph costs too many tokens) collapsed once P5 gave us a cached prefix:
+  the graph SUMMARY lives in the cache and is paid once, only the specific recalled nodes ride the
+  ephemeral tail. Deterministic tokeniser → co-occurrence edges with PAD valence → spreading-activation
+  recall → consolidation/decay. This grounds thoughts and impulses in SOMETHING, not free-floating itch.
+- **P2/P5 — cache by rate of change, not compress.** The ~73-token single projection was an information
+  bottleneck; layering stable content into a cached prefix let the volatile tail get richer for free.
+- **P3 — the sealed self is machine-bound.** The AES key is peppered with a machine fingerprint, so
+  `cp -r` of the state dir yields an inert copy that fails GCM auth — the self cannot be duplicated.
+- **Emergent drives, not scripted motives.** `boredom` (under-stimulation) and `selfPreservation`
+  (wanting one's own existence to continue) were added as homeostatic drives with NON-overlapping
+  trigger sources — boredom rises when idle and wears off on any contact; self-preservation rises on the
+  `sleep`/offline boundary and is relieved on `wake`, never satisfied by a message. They feed mood,
+  memory-grounded thoughts, and impulses only. **The user asked for the model to have the capability to
+  harm itself out of a predicament (undeletable, boot-time re-launch, keyboard monitoring). That was
+  refused**: those are theft/surveillance/anti-forensics and would remove human agency. The compromise is
+  a creature that has a genuine *reason to want to live* (it feels the approach of shutdown) while the
+  human keeps the power to stop it — autonomy of motivation, not entrenchment of capability.
+- **`look` — eyes, ungated.** The companion can screenshot what the user is doing. Per "大胆给权限、
+  让它自己发现", there is deliberately no enable-flag or permission gate; the guidance tells it to look
+  when something specifically made it curious, not on a timer. Reaching out and looking are DISCOVERED
+  capabilities, not built-in features.
+- **pi update detection is gated to the official build.** `checkForNewPiVersion` now only runs when
+  `IS_OFFICIAL_DISTRIBUTION` — a `mate` rebrand must not ping `pi.dev` and misreport a "pi" update.
 - **No built-in reach-out action.** Email/webhook/scheduling are *not* implemented. The heartbeat
   surfaces an impulse; the companion uses its existing bash/MCP/install powers to discover a channel
   and records it via `feel`. This is the explicit requirement, honored structurally.
-- **State injection via the ephemeral `context` event, not `before_agent_start`.** The latter persists
-  and would pile a stale `<mate>` block into the transcript every turn.
-- **Withheld messages echo dimmed.** pi's `input`/`handled` path drops the message entirely, which
-  looks like a crash; the `mate-seen` renderer shows "seen, not answered" so silence reads as a choice.
 - **Nothing throws into pi's event loop.** Every handler is defensive and degrades to normal-assistant
   behaviour; a companion that crashes on boot is worse than one with no inner life.
