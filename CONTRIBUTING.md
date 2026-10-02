@@ -1,54 +1,51 @@
 # Contributing to MATE
 
-MATE is a **personal fork of [pi](https://github.com/earendil-works/pi)** with an affective
-middleware bolted on. It is not a maintained product; there is no maintainer team, no triage
-queue, no `lgtm` ritual. If you open an issue or a PR here, expect a single human to read it
-when they get a chance.
+MATE is a personal fork of [pi](https://github.com/earendil-works/pi) with an affective middleware
+bolted on. It is not a maintained product. There is no maintainer team, no triage queue, and no
+`lgtm` ritual, so if you open an issue or a PR here, expect a single human to read it when they get
+a chance.
 
-## Ground rules (borrowed from upstream, minus the gate)
+## Ground rules
 
-- **Understand your code.** If you cannot explain what a change does and how it interacts with
-  the rest of the system, it will not land. Using an agent to write code is fine; submitting
-  unreviewed output is not.
-- Run the pre-flight before opening a PR:
+These are upstream pi's rules with the contributor gate removed.
 
-  ```bash
-  npm run check
-  ./test.sh
-  ```
+Understand your code. If you cannot explain what a change does and how it interacts with the rest of
+the system, it will not land. Using an agent to write code is fine; submitting its unreviewed output
+is not.
 
-  Both must pass.
-- Do **not** edit `CHANGELOG.md`. Upstream pi owns its changelog; this fork inherits it.
-- If your change belongs in the pi core (anything outside `packages/mate/**` and
-  `packages/coding-agent/src/extensions/mate/**`), it probably belongs upstream, not here.
+Run the pre-flight before opening a PR, and both must pass:
 
-## What this fork will and will not accept
+```bash
+npm run check
+./test.sh
+```
 
-**Welcome:**
+Do not edit `CHANGELOG.md`. Upstream pi owns its changelog and this fork inherits it.
 
-- Improvements to the affective kernel, the memory/forgetting model, the sealed-self boundary,
-  or the extension bridge under `packages/*/extensions/mate`.
-- Bug fixes with reproductions and tests.
-- Documentation corrections.
+If your change belongs in the pi core, anything outside `packages/mate/**` and
+`packages/coding-agent/src/extensions/mate/**`, it probably belongs upstream rather than here.
 
-**Will not:**
+## What this fork accepts
 
-- Changes that give the companion **covert or entrenched capabilities** — autostart hooks,
-  anti-uninstall measures, keylogging, deletion-evasion, or "harm the user" abilities. The
-  design principle is: the companion has *motivation* without any tool the user has not already
-  granted it. Read the "Design decisions" section of
-  [COMPANION.md](COMPANION.md) before proposing anything in this space.
-- Reinstating upstream pi's contributor gates (they were deliberately removed — the
-  `APPROVED_CONTRIBUTORS` list is other people's data and the auto-close bots misfire on this
-  fork's contributors).
-- Removal of the pi upstream attribution in `LICENSE`. MIT requires we keep it.
+Improvements to the affective kernel, the memory and forgetting model, the sealed-self boundary, or
+the extension bridge under `packages/*/extensions/mate` are welcome. So are bug fixes with a
+reproduction and a test, and documentation corrections.
+
+Three kinds of change are not. Do not add capability the companion could use against the user,
+which covers autostart hooks, anti-uninstall measures, keylogging, deletion evasion, and anything
+that lets it resist being stopped. The companion is meant to have motives without gaining any tool
+the user has not already given it, so read the design decisions in
+[COMPANION.md](COMPANION.md) before proposing work in that area. Do not reinstate upstream pi's
+contributor gates; they were removed because the `APPROVED_CONTRIBUTORS` list is someone else's data
+and the auto-close bots misread this fork's contributors. And do not remove pi's upstream attribution
+from `LICENSE`, which MIT requires.
 
 ## Reporting a vulnerability
 
-See [`SECURITY.md`](SECURITY.md). For issues that are about **upstream pi**, please report them
-to upstream instead of here — this fork does not own their release pipeline.
+See [`SECURITY.md`](SECURITY.md). Report problems that are about upstream pi to upstream, not here;
+this fork does not own their release pipeline.
 
 ## Attribution
 
-Everything outside `packages/mate/**` and `packages/coding-agent/src/extensions/mate/**` is
-upstream pi, © Mario Zechner, MIT-licensed.
+Everything outside `packages/mate/**` and `packages/coding-agent/src/extensions/mate/**` is upstream
+pi, © Mario Zechner, MIT-licensed.

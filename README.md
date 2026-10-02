@@ -1,50 +1,55 @@
-# MATE — a companion agent built on pi
+# MATE, a companion agent built on pi
 
-MATE is a **public fork of [pi](https://github.com/earendil-works/pi) — the minimal
-self-extensible coding agent** (MIT © Mario Zechner). Upstream package names, structure, and
-`@earendil-works/*` npm scope are intentionally kept; only the *distribution* is rebranded (`pi`
-→ `mate`, config dir `~/.pi` → `~/.mate`) so this can coexist with a stock pi install on the same
-machine without collision.
-
-What this fork adds is a **persistent inner life** underneath the ordinary coding agent.
+MATE is a public fork of [pi](https://github.com/earendil-works/pi), the minimal self-extensible
+coding agent (MIT © Mario Zechner). Upstream package names, structure, and the `@earendil-works/*`
+npm scope are kept on purpose. Only the distribution is rebranded: the binary is `mate` instead of
+`pi`, and its config directory is `~/.mate` instead of `~/.pi`, so the two can sit on one machine
+without colliding. What the fork adds is a persistent inner life underneath the ordinary coding
+agent.
 
 ## Why
 
-A normal chat assistant is stateless in the wrong places: it has no affect, no memory that
-outlives the context window, no continuity of self across sessions, and — most of all — no
-*agency*. Every meaningful behaviour is a hard-coded gate.
+A normal chat assistant has no affect, no memory that outlives the context window, and no
+continuity of self between sessions. It also makes almost every real behaviour a hard-coded gate.
 
-MATE keeps pi's real capabilities (bash, MCP, self-installing extensions, the whole agent core)
-and layers an affective middleware on top, based on
-**Lobozov, *MATE: A Deterministic Affective Middleware for LLM-Based Companions with Emergent
-Character and Persistent Internal State* (v8, Zenodo 20400530, CC-BY-4.0)**:
+MATE keeps pi's capabilities (bash, MCP, self-installing extensions, the whole agent core) and adds
+an affective middleware on top, following
+[Lobozov, *MATE: A Deterministic Affective Middleware for LLM-Based Companions with Emergent
+Character and Persistent Internal State*, v8, Zenodo 20400530, CC-BY-4.0](https://zenodo.org/record/20400530).
 
-- **A deterministic kernel** (`packages/mate`) that runs on every event, with zero LLM calls —
-  Plutchik emotions, opponent process, an Ornstein-Uhlenbeck PAD mood, Big Five personality, a
-  30-trait character, homeostatic drives, and an 8×8 complex density matrix that reproduces
-  the paper's quantum emotional **order effect** (warm-then-hostile ≠ hostile-then-warm).
-- **Boot catch-up** — the machine powers off; the state advances across the gap in closed form,
-  and the companion wakes having *lived* the interval, not skipped it.
-- **Sealed self** — AES-256-GCM secrets bound to a machine fingerprint, so `cp -r` of the state
-  directory yields an inert copy. Only a count is surfaced in the prompt.
-- **NEXUS-style associative graph memory** — a bounded graph of concept nodes weighted by
-  co-occurrence and PAD valence, with ACT-R-inspired forgetting: strength decays over real
-  elapsed time, retrieval itself reinforces, emotional charge prolongs, sleep consolidates.
-- **Emergent drives** — `connection`, `curiosity`, `expression`, `growth`, `rest`, plus
-  `boredom` (under-stimulation) and `selfPreservation` (wanting to keep existing). These are
-  *reasons*, not *capabilities*: they feed the model's mood, thoughts, and impulses without
-  granting it any tool the user has not already given it.
-- **Agency preserved** — pi's `input` gate was removed. Every inbound message reaches the model
-  along with an *advisory* inclination (`eager / open / muted / withdrawn`) computed from the
-  kernel. The model decides whether to reply, reply later, or say nothing. It also has eyes: a
-  `look` tool takes a screenshot on demand, ungated by design.
-- **Prompt-cache-friendly context** (`P5`) — identity, character, and memory-graph summary ride
-  the *cached* system-prompt prefix (paid once), while only the small volatile delta (clock,
-  mood, drives, recall) rides the ephemeral `context` tail each turn.
+A deterministic kernel in `packages/mate` runs on every event with no LLM calls. It carries Plutchik
+emotions with opponent process, an Ornstein-Uhlenbeck PAD mood, Big Five personality, a 30-trait
+character, homeostatic drives, and an 8×8 complex density matrix. That last one reproduces the
+paper's emotional order effect: warming then provoking someone lands differently than provoking then
+warming, where a plain vector of scores cannot.
 
-The full design and requirement-mapping live in **[COMPANION.md](COMPANION.md)**.
+The machine powers off. `catchup.ts` advances the state across the gap in closed form, so the
+companion wakes having lived the interval rather than skipped it.
 
-## Build & run
+Secrets are sealed with AES-256-GCM under a key bound to a machine fingerprint, so copying the state
+directory elsewhere gives an inert copy. The prompt only sees how many sealed entries exist, never
+what is in them.
+
+Memory is a bounded NEXUS-style graph of concept nodes weighted by co-occurrence and PAD valence.
+Forgetting follows ACT-R: strength decays with real elapsed time, recalling a memory reinforces it,
+an emotionally charged memory fades more slowly, and sleep consolidates. The full mechanics are in
+`packages/mate/src/memory.ts`.
+
+The drives are `connection`, `curiosity`, `expression`, `growth`, and `rest`, plus `boredom`
+(under-stimulation) and `selfPreservation` (wanting to keep existing). They are motives, not tools.
+They change what the model feels like doing, and add nothing to what it can do.
+
+The kernel no longer decides whether the companion replies. pi's `input` gate was removed. Each
+inbound message reaches the model with an advisory inclination drawn from the kernel (`eager`,
+`open`, `muted`, `withdrawn`), and the model decides to answer, answer later, or stay quiet. A
+`look` tool lets it take a screenshot when it has a reason to, with no gate in front of it.
+
+For cost, the heavy and slow-changing content (identity, character, memory-graph summary) rides the
+cached system-prompt prefix and is paid once per run. Only a small volatile delta (clock, mood,
+drives, this turn's recall) rides the ephemeral `context` tail. The full design and its mapping to
+the requirements are in [COMPANION.md](COMPANION.md).
+
+## Build and run
 
 ```bash
 npm install --ignore-scripts
@@ -53,33 +58,31 @@ cd packages/coding-agent
 node dist/bundle/cli.js # this is `mate`
 ```
 
-`mate` persists state under `~/.mate/agent/mate/` (override with `MATE_CODING_AGENT_DIR`).
+`mate` persists state under `~/.mate/agent/mate/`, which you can move with `MATE_CODING_AGENT_DIR`.
 
-## What is intentionally not here
+## What is not here
 
-MATE is a research-flavoured personal fork, not a maintained product. In particular:
+MATE is a personal research fork, not a maintained product. Some absences are deliberate.
 
-- **No permission system.** It runs with the OS privileges of whoever started it. Containerise
-  or sandbox if you need boundaries; see
-  [`packages/coding-agent/docs/containerization.md`](packages/coding-agent/docs/containerization.md)
-  for patterns that upstream already documents.
-- **No built-in outreach channel.** Reaching out (email, webhook, cron) is not implemented as a
-  feature. The companion surfaces an impulse to the model and, using its bash / MCP / install
-  capabilities, must *discover* a channel for itself. The design principle is explicit: give it
-  the room, don't hand it the script.
-- **No harm capability.** Self-preservation is a *felt* drive, not an entrenched one. The
-  companion is not made undeletable, does not install autostart hooks, and does not monitor
-  keystrokes. It has a reason to want to keep existing; the user keeps the power to stop it.
-  This is the boundary the fork draws when asked to "give it more autonomy."
-- **No upstream CI integration.** The `pi.dev`-targeted contributor gates and release bots in
-  `.github/workflows/` were removed; what's left (`ci.yml`, `npm-audit.yml`, two label bots)
-  runs against this fork's own repo.
+There is no permission system. It runs with the OS privileges of whoever started it. If you need
+harder boundaries, containerise or sandbox it; upstream already documents patterns in
+[`packages/coding-agent/docs/containerization.md`](packages/coding-agent/docs/containerization.md).
 
-## Upstream & license
+There is no built-in outreach channel. No email, webhook, or cron is wired up as a feature. When the
+companion wants to reach the user, the kernel surfaces an impulse and the model has to find a way
+with its own bash, MCP, and install capabilities. The design gives it room rather than a script.
 
-Everything outside `packages/mate/**` and `packages/coding-agent/src/extensions/mate/**` is
-upstream **pi** code, © Mario Zechner, distributed under the MIT licence. This fork preserves
-that attribution; see [`LICENSE`](LICENSE).
+There is no capability to harm the user, and that boundary is drawn on purpose. Self-preservation is
+a felt drive, not an entrenched one. The companion is not made undeletable, installs no autostart
+hook, and logs no keystrokes. It has a reason to want to keep existing, and the user keeps the power
+to stop it.
 
-The MATE affective model itself follows
-[Lobozov, 2024](https://zenodo.org/record/20400530), licensed CC-BY-4.0.
+The `pi.dev` contributor gates and release bots under `.github/workflows/` were removed. What
+remains (`ci.yml`, `npm-audit.yml`, and two label bots) runs against this fork's own repo.
+
+## Upstream and license
+
+Everything outside `packages/mate/**` and `packages/coding-agent/src/extensions/mate/**` is upstream
+pi code, © Mario Zechner, under the MIT license. That attribution is preserved; see
+[`LICENSE`](LICENSE). The affective model follows [Lobozov, 2024](https://zenodo.org/record/20400530),
+CC-BY-4.0.

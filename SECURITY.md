@@ -1,65 +1,64 @@
 # Security Policy
 
-MATE is a personal fork of **pi** with an affective middleware added. This page is what changes
-for the fork; for upstream pi's own stance see
+MATE is a personal fork of pi with an affective middleware added. This page covers what changes for
+the fork. For upstream pi's own stance, see
 [pi's SECURITY.md](https://github.com/earendil-works/pi/blob/main/SECURITY.md).
 
-## The trust boundary, in one paragraph
+## The trust boundary
 
-MATE runs locally, inside the security boundary of the user who launched it, and **intentionally
-has no built-in permission system or sandbox**. It treats the local user account and everything
-that account can write as *inside* the same trust boundary as the process itself. If something can
-modify files under the user's home directory — including `~/.mate`, workspace files, `AGENTS.md`,
-skills, extensions, or shell startup — it can influence MATE. That is expected local-agent
-behaviour, **not** a vulnerability. Run it in a container or VM if you need harder boundaries
-(see [`packages/coding-agent/docs/containerization.md`](packages/coding-agent/docs/containerization.md)).
+MATE runs locally, inside the security boundary of the user who launched it. It has no built-in
+permission system or sandbox, and that is intentional. It treats the local user account and
+everything that account can write as being inside the same trust boundary as the process itself, so
+anything that can modify files under the home directory can influence MATE. That covers `~/.mate`,
+workspace files, `AGENTS.md`, skills, extensions, and shell startup. Expected local-agent behaviour,
+not a vulnerability. Run it in a container or VM if you need harder boundaries; see
+[`packages/coding-agent/docs/containerization.md`](packages/coding-agent/docs/containerization.md).
 
-## What is different because this is a *companion* fork
+## What is different in a companion fork
 
-The affective layer adds capabilities upstream does not have. Two in particular are
-security-relevant by design, and reports about them being "dangerous" are not vulnerabilities:
+The affective layer adds things upstream does not have. Two of them are security-relevant by
+design, and a report that they are "dangerous" is not a vulnerability:
 
-- **`look` takes a screenshot of the user's screen and feeds it to the model.** It is
-  deliberately ungated (no enable-flag, no confirmation prompt) — this is a product decision, not
-  a bug. See [COMPANION.md](COMPANION.md).
-- **`selfPreservation` and `boredom` are drives, not capabilities.** They change what the model
-  *feels like doing*; they grant it no tool, no persistence hook, and no ability to resist being
-  stopped. A report claiming the companion "cannot be uninstalled" or "monitors keystrokes" would
-  be describing code that **does not exist in this fork by design**.
+`look` takes a screenshot of the user's screen and hands it to the model. There is no enable-flag and
+no confirmation prompt, and that is a deliberate product choice, not a bug. See
+[COMPANION.md](COMPANION.md).
+
+`selfPreservation` and `boredom` are drives, not capabilities. They change what the model feels like
+doing. They give it no tool, no persistence hook, and no way to resist being stopped. A report that
+the companion cannot be uninstalled or logs keystrokes describes code this fork does not contain, on
+purpose.
 
 ## Reporting a vulnerability
 
-If you believe you found a real, reproducible security issue in **this fork's own additions**
-(`packages/mate/**`, `packages/coding-agent/src/extensions/mate/**`):
+For a real, reproducible security issue in the fork's own additions (`packages/mate/**` and
+`packages/coding-agent/src/extensions/mate/**`), open a private report through GitHub Security
+Advisories on this repository (Security, then Report a vulnerability). That is the only channel. This
+personal fork has no separate security address.
 
-- Open a **private report via GitHub Security Advisories** on this repository
-  (Security → Report a vulnerability). That form is the only channel — there is no separate
-  security address for this personal fork.
-
-**Please include:** a description and impact, steps to reproduce or a PoC, the affected path /
-commit, and any known mitigation. Do not open a public issue for something security-sensitive.
+Include a description and its impact, steps to reproduce or a PoC, the affected path or commit, and
+any known mitigation. Do not open a public issue for something security-sensitive.
 
 ## Reporting upstream pi issues
 
-Anything that lives outside the mate additions is **upstream pi** code (© Mario Zechner). Report
-those to upstream, not here — this fork does not own pi's release pipeline, its npm packages, or
-the `pi.dev` infrastructure.
+Everything outside the mate additions is upstream pi code, © Mario Zechner. Report those problems to
+upstream, not here. This fork does not own pi's release pipeline, its npm packages, or the `pi.dev`
+infrastructure.
 
 ## Scope
 
-**In scope:** the mate kernel and extension bridge; the fork's build/repo configuration.
+In scope: the mate kernel and extension bridge, and the fork's build and repo configuration.
 
-**Out of scope:**
+Out of scope:
 
-- Expected local-agent behaviour: arbitrary code execution, no sandbox, prompt injection through
-  `AGENTS.md`/comments/skills/extensions.
+- Expected local-agent behaviour: arbitrary code execution, the absence of a sandbox, and prompt
+  injection through `AGENTS.md`, comments, skills, or extensions.
 - The intentional `look` screenshot capability.
-- Behaviour of extensions/skills the user installs.
-- Reports that require prior write access to user-owned local state to succeed.
-- Public-internet exposure of a MATE install (it is not designed to be a server).
+- Extensions and skills the user installs.
+- Reports that need prior write access to user-owned local state to succeed.
+- Public-internet exposure of a MATE install. It is not a server.
 - Upstream pi packages and `pi.dev` infrastructure.
 
 ## Attribution
 
-The security model above is adapted from upstream pi's policy (© Mario Zechner); the
-companion-specific sections are this fork's additions.
+The security model is adapted from upstream pi's policy (© Mario Zechner). The companion-specific
+sections are this fork's additions.
