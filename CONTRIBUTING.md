@@ -1,102 +1,54 @@
-# Contributing to pi
+# Contributing to MATE
 
-This guide exists to save both sides time.
+MATE is a **personal fork of [pi](https://github.com/earendil-works/pi)** with an affective
+middleware bolted on. It is not a maintained product; there is no maintainer team, no triage
+queue, no `lgtm` ritual. If you open an issue or a PR here, expect a single human to read it
+when they get a chance.
 
-## Philosophy
+## Ground rules (borrowed from upstream, minus the gate)
 
-First things first: **pi's core is minimal**.
+- **Understand your code.** If you cannot explain what a change does and how it interacts with
+  the rest of the system, it will not land. Using an agent to write code is fine; submitting
+  unreviewed output is not.
+- Run the pre-flight before opening a PR:
 
-If your feature does not belong in the core, it should be an extension. PRs that bloat the core will likely be rejected.
+  ```bash
+  npm run check
+  ./test.sh
+  ```
 
-Pi's core exists to be minimal and to be extensible so that it can be influenced and manipulated by extensions.  Even hook points for extensions however should be well considered and discussed to avoid adding unmaintainable bloat and complex interactions.
+  Both must pass.
+- Do **not** edit `CHANGELOG.md`. Upstream pi owns its changelog; this fork inherits it.
+- If your change belongs in the pi core (anything outside `packages/mate/**` and
+  `packages/coding-agent/src/extensions/mate/**`), it probably belongs upstream, not here.
 
-## The One Rule
+## What this fork will and will not accept
 
-**You must understand your code.** If you cannot explain what your changes do and how they interact with the rest of the system, your PR will be closed.
+**Welcome:**
 
-Using AI to write code is fine. Submitting AI-generated slop without understanding it is not.
+- Improvements to the affective kernel, the memory/forgetting model, the sealed-self boundary,
+  or the extension bridge under `packages/*/extensions/mate`.
+- Bug fixes with reproductions and tests.
+- Documentation corrections.
 
-If you use an agent, run it from the `pi` root directory so it picks up `AGENTS.md` automatically. Your agent must follow the rules and guidelines in that file.
+**Will not:**
 
-## Contribution Gate
+- Changes that give the companion **covert or entrenched capabilities** — autostart hooks,
+  anti-uninstall measures, keylogging, deletion-evasion, or "harm the user" abilities. The
+  design principle is: the companion has *motivation* without any tool the user has not already
+  granted it. Read the "Design decisions" section of
+  [COMPANION.md](COMPANION.md) before proposing anything in this space.
+- Reinstating upstream pi's contributor gates (they were deliberately removed — the
+  `APPROVED_CONTRIBUTORS` list is other people's data and the auto-close bots misfire on this
+  fork's contributors).
+- Removal of the pi upstream attribution in `LICENSE`. MIT requires we keep it.
 
-All issues and PRs from new contributors are auto-closed by default.
+## Reporting a vulnerability
 
-Issues submitted Friday through Sunday are not guaranteed to be reviewed.  If something is urgent, ask on Discord: https://discord.com/invite/3cU7Bz4UPx
+See [`SECURITY.md`](SECURITY.md). For issues that are about **upstream pi**, please report them
+to upstream instead of here — this fork does not own their release pipeline.
 
-Maintainers review auto-closed issues daily and reopen worthwhile ones. Issues that do not meet the quality bar below will not be reopened or receive a reply.
+## Attribution
 
-Approval happens through maintainer replies on issues:
-
-- `lgtmi`: your future issues will not be auto-closed
-- `lgtm`: your future issues and PRs will not be auto-closed
-
-The command must be at the start of the reply (optionally after one or more `@username` mentions) or at the end. `lgtmi` does not grant rights to submit PRs. Only `lgtm` grants rights to submit PRs.
-
-## Quality Bar For Issues
-
-If you open an issue, you must use one of the two GitHub issue templates.
-
-If you open an issue, keep it short, concrete, and worth reading.
-
-- Keep it concise. If it does not fit on one screen, it is too long.
-- Write in your own voice (do not use an LLM to generate text, if you must, follow up with a clearly AI labeled comment).
-- State the bug or request clearly.
-- Explain why it matters.
-- If you want to implement the change yourself, say so.
-
-If the issue is real and written well, a maintainer may reopen it or reply with `lgtmi` or `lgtm` in the command position described above.
-
-## Blocking
-
-If you ignore this document twice, or if you spam the tracker with agent-generated issues, your GitHub account will be permanently blocked.
-
-If you send a large volume of issues through automation, your GitHub account will be permanently blocked. No taksies backsies.
-
-## Before Submitting a PR
-
-Do not open a PR unless you have already been approved by a maintainer using `lgtm` in the command position described above.
-
-Before submitting a PR:
-
-```bash
-npm run check
-./test.sh
-```
-
-Both must pass.
-
-Do not edit `CHANGELOG.md`. Changelog entries are added by maintainers.
-
-If you are adding a new provider to `packages/ai`, see `AGENTS.md` for required tests.
-
-## Questions?
-
-Ask on [Discord](https://discord.com/invite/nKXTsAcmbT).
-
-## FAQ
-
-### Why are new issues and PRs auto-closed?
-
-pi receives more issues than the maintainers can responsibly review in real time. Many reports do not meet the quality bar in this guide or do not follow CONTRIBUTING.md. Some are slung at the repository mindlessly via an agent instead of being reviewed and shaped by the person submitting them. Auto-closing creates a buffer so maintainers can review the tracker on their own schedule and reopen the issues that meet the quality bar.
-
-### Why are weekend issues lower priority?
-
-We triage the tracker during working hours. That means more issues can accumulate over the weekend. Anything submitted Friday through Sunday may be missed or given lower priority in the Monday review queue. If a problem is urgent, ask on Discord and include the short version, a repro, and the relevant logs.
-
-### Why do some issues get no reply?
-
-A reply is maintenance work too. Low-signal issues, unclear reports, duplicates, and issues that do not follow this guide may be closed without discussion. This keeps time available for reproducible bugs, thoughtful requests, and contributors who have done the work to make their report actionable.
-
-### Why not let AI triage everything?
-
-AI can help group duplicates, summarize reports, and spot missing information. It is not trusted to make final maintainer decisions. Polished AI-generated issues can still be wrong, misleading, or expensive to investigate. Human review remains the final gate.
-
-### Is this hostile to contributors?
-
-No. It is a guardrail against burnout and tracker spam. Short, concrete, reproducible issues are welcome. Thoughtful contributions are welcome. Automated slop, entitlement, and large volumes of low-effort reports are not.
-
-## Where can I learn about plans?
-
-Earendil uses RFCs to discuss larger changes.  Not all of them are public, but
-quite a few are.  They can be found at [rfc.earendil.com](https://rfc.earendil.com/keyword/pi/).
+Everything outside `packages/mate/**` and `packages/coding-agent/src/extensions/mate/**` is
+upstream pi, © Mario Zechner, MIT-licensed.
