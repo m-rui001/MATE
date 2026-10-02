@@ -182,7 +182,19 @@ node dist/bundle/cli.js           # the companion; bin is `pi`/`mate`
 
 - `/mate` — public mood/drives snapshot (never shows sealed data).
 - `feel` — the model's tool to refine its affective read and record channels it found for itself.
-- State persists in `~/.pi/agent/mate/` (override with `PI_CODING_AGENT_DIR`).
+- State persists in `~/.mate/agent/mate/` (override with `MATE_CODING_AGENT_DIR`).
+
+## Naming (avoiding collision with pi)
+
+The distribution is rebranded to `mate` via `package.json` `piConfig` (`name: "mate"`,
+`configDir: ".mate"`) and a `mate`-only `bin`. This matters because a real pi on the same machine
+would otherwise clash on two fronts: the `pi` executable on `PATH`, and the shared `~/.pi/agent`
+config directory (sessions, `auth.json`, `settings.json`, tools). Everything user-facing derives
+from `APP_NAME`/`CONFIG_DIR_NAME` (`config.ts`), so `getAgentDir()` → `~/.mate/agent`, the state
+dir → `~/.mate/agent/mate`, and the env override becomes `MATE_CODING_AGENT_DIR`. The `@earendil-works/pi-*`
+npm scope is intentionally left unchanged — renaming it would churn the lockfiles/shrinkwrap for no
+collision benefit, since the package is never installed as `pi`. A rebrand also means `isOfficialDistribution()`
+returns false, which correctly disables pi's experimental first-time-setup wizard for this build.
 
 Checks that pass: `tsc --noEmit` (whole monorepo), `biome check` on the mate files, 18/18 kernel unit
 tests, `check:runtime-deps`, `check:ts-imports`, and a full bundle build (73 files).

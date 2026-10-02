@@ -91,12 +91,12 @@ jobs:
           cd packages/coding-agent/binaries
 
           binary_assets=(
-            pi-darwin-arm64.tar.gz
-            pi-darwin-x64.tar.gz
-            pi-linux-x64.tar.gz
-            pi-linux-arm64.tar.gz
-            pi-windows-x64.zip
-            pi-windows-arm64.zip
+            mate-darwin-arm64.tar.gz
+            mate-darwin-x64.tar.gz
+            mate-linux-x64.tar.gz
+            mate-linux-arm64.tar.gz
+            mate-windows-x64.zip
+            mate-windows-arm64.zip
           )
 
           for asset in "${binary_assets[@]}"; do
@@ -109,12 +109,12 @@ jobs:
           source_asset="pi-${VERSION}-source.tar.gz"
           release_assets=(
             "${source_asset}"
-            pi-darwin-arm64.tar.gz
-            pi-darwin-x64.tar.gz
-            pi-linux-x64.tar.gz
-            pi-linux-arm64.tar.gz
-            pi-windows-x64.zip
-            pi-windows-arm64.zip
+            mate-darwin-arm64.tar.gz
+            mate-darwin-x64.tar.gz
+            mate-linux-x64.tar.gz
+            mate-linux-arm64.tar.gz
+            mate-windows-x64.zip
+            mate-windows-arm64.zip
             pi-coding-agent-install-package.json
             pi-coding-agent-install-package-lock.json
           )
@@ -166,21 +166,21 @@ jobs:
           case "${runtime_platform}" in
             darwin-arm64|darwin-x64|linux-arm64|linux-x64)
               platform="${runtime_platform}"
-              archive="release-assets/pi-${platform}.tar.gz"
-              root="extracted/pi"
-              binary="${root}/pi"
+              archive="release-assets/mate-${platform}.tar.gz"
+              root="extracted/mate"
+              binary="${root}/mate"
               ;;
             win32-arm64)
               platform="windows-arm64"
-              archive="release-assets/pi-${platform}.zip"
+              archive="release-assets/mate-${platform}.zip"
               root="extracted"
-              binary="${root}/pi.exe"
+              binary="${root}/mate.exe"
               ;;
             win32-x64)
               platform="windows-x64"
-              archive="release-assets/pi-${platform}.zip"
+              archive="release-assets/mate-${platform}.zip"
               root="extracted"
-              binary="${root}/pi.exe"
+              binary="${root}/mate.exe"
               ;;
             *)
               echo "::error::Unsupported runner platform ${runtime_platform}"
@@ -235,12 +235,12 @@ jobs:
           source_asset="pi-${VERSION}-source.tar.gz"
           expected_assets=(
             "${source_asset}"
-            pi-darwin-arm64.tar.gz
-            pi-darwin-x64.tar.gz
-            pi-linux-x64.tar.gz
-            pi-linux-arm64.tar.gz
-            pi-windows-x64.zip
-            pi-windows-arm64.zip
+            mate-darwin-arm64.tar.gz
+            mate-darwin-x64.tar.gz
+            mate-linux-x64.tar.gz
+            mate-linux-arm64.tar.gz
+            mate-windows-x64.zip
+            mate-windows-arm64.zip
             pi-coding-agent-install-package.json
             pi-coding-agent-install-package-lock.json
             SHA256SUMS
@@ -265,12 +265,12 @@ jobs:
           source_asset="pi-${VERSION}-source.tar.gz"
           release_assets=(
             "${source_asset}"
-            pi-darwin-arm64.tar.gz
-            pi-darwin-x64.tar.gz
-            pi-linux-x64.tar.gz
-            pi-linux-arm64.tar.gz
-            pi-windows-x64.zip
-            pi-windows-arm64.zip
+            mate-darwin-arm64.tar.gz
+            mate-darwin-x64.tar.gz
+            mate-linux-x64.tar.gz
+            mate-linux-arm64.tar.gz
+            mate-windows-x64.zip
+            mate-windows-arm64.zip
             pi-coding-agent-install-package.json
             pi-coding-agent-install-package-lock.json
             SHA256SUMS

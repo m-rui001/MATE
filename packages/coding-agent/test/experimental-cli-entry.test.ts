@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { VERSION } from "../src/config.ts";
+import { ENV_AGENT_DIR, VERSION } from "../src/config.ts";
 
 // --import takes a module specifier, not a filesystem path.
 const sourceResolverUrl = pathToFileURL(resolve(__dirname, "../src/experimental/source-resolver.ts")).href;
@@ -36,7 +36,7 @@ function runEntry(entry: string, experimental: boolean) {
 				...process.env,
 				HOME: directory,
 				USERPROFILE: directory,
-				PI_CODING_AGENT_DIR: join(directory, "agent"),
+				[ENV_AGENT_DIR]: join(directory, "agent"),
 				PI_OFFLINE: "1",
 				PI_EXPERIMENTAL: experimental ? "1" : "0",
 			},

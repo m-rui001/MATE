@@ -33,8 +33,10 @@ describe("shouldRunFirstTimeSetup", () => {
 		}
 	});
 
-	it("returns true when experimental, default agent dir, and no settings.json", () => {
-		expect(shouldRunFirstTimeSetup(settingsPath)).toBe(true);
+	it("returns false for the mate rebrand even when experimental and no settings.json", () => {
+		// mate ships a rebranded name/configDir, so isOfficialDistribution() is false and
+		// pi's first-time-setup wizard never runs for this distribution.
+		expect(shouldRunFirstTimeSetup(settingsPath)).toBe(false);
 	});
 
 	it("returns false when experimental features are disabled", () => {
