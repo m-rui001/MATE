@@ -62,12 +62,29 @@ what an English one does; only the labels move.
 
 ## Get MATE
 
-Two ways in. **Prebuilt binaries (no Node needed):** download the archive for your platform from
-[the v1.0.0-mate release](https://github.com/m-rui001/MATE/releases/tag/v1.0.0-mate) —
+**One-line install (puts `mate` on your PATH, no sudo/admin, no Node needed):**
+
+Windows PowerShell:
+
+```powershell
+iwr https://raw.githubusercontent.com/m-rui001/MATE/main/scripts/install.ps1 -useb | iex
+```
+
+macOS / Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/m-rui001/MATE/main/scripts/install.sh | bash
+```
+
+Then open a new terminal and type `mate`. Manual alternative: download the archive for your
+platform from [the release page](https://github.com/m-rui001/MATE/releases/tag/v1.0.0-mate) —
 `mate-windows-x64.zip` / `mate-windows-arm64.zip` (run `mate.exe`), `mate-linux-x64.tar.gz` /
 `mate-linux-arm64.tar.gz` and `mate-darwin-x64.tar.gz` / `mate-darwin-arm64.tar.gz` (run `mate/mate`
 after `tar -xzf`). On macOS, if Gatekeeper blocks it: `xattr -d com.apple.quarantine mate`.
-Config lives in `~/.mate`; first run asks which language the companion thinks and speaks in.
+Config lives in `~/.mate` (override with `MATE_CODING_AGENT_DIR`); first run asks which language
+the companion thinks and speaks in. Third-party extensions that locate config through
+`PI_CODING_AGENT_DIR` are bridged to the same directory automatically; ones with `~/.pi` hardcoded
+in their own defaults still need to be pointed at it.
 
 **Build from source:** Requires Node >= 22.19. Each line is a
 separate command (do not copy the comment onto the line; cmd.exe does not treat `#` as a comment).
@@ -159,7 +176,21 @@ MATE 保留了 pi 的能力（bash、MCP、自安装扩展、整个代理核心�
 
 ## 获取 MATE
 
-两种途径。**免编译安装包（无需 Node）：** 到 [v1.0.0-mate release](https://github.com/m-rui001/MATE/releases/tag/v1.0.0-mate) 下载对应平台的压缩包——Windows 下 `mate-windows-x64.zip` / `mate-windows-arm64.zip`（解压后运行 `mate.exe`），Linux / macOS 下 `mate-linux-x64.tar.gz`、`mate-darwin-arm64.tar.gz` 等（`tar -xzf` 解压后运行 `mate/mate`）。macOS 若被 Gatekeeper 拦截：`xattr -d com.apple.quarantine mate`。配置在 `~/.mate`；首次启动会询问伴侣用什么语言思考和说话。
+**一行命令安装（自动把 `mate` 加进 PATH，不需要管理员权限，也不需要 Node）：**
+
+Windows PowerShell：
+
+```powershell
+iwr https://raw.githubusercontent.com/m-rui001/MATE/main/scripts/install.ps1 -useb | iex
+```
+
+macOS / Linux：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/m-rui001/MATE/main/scripts/install.sh | bash
+```
+
+然后新开一个终端，直接输入 `mate`。手动方式：到 [release 页面](https://github.com/m-rui001/MATE/releases/tag/v1.0.0-mate) 下载对应平台的压缩包——Windows 下 `mate-windows-x64.zip` / `mate-windows-arm64.zip`（解压后运行 `mate.exe`），Linux / macOS 下 `mate-linux-x64.tar.gz`、`mate-darwin-arm64.tar.gz` 等（`tar -xzf` 解压后运行 `mate/mate`）。macOS 若被 Gatekeeper 拦截：`xattr -d com.apple.quarantine mate`。配置在 `~/.mate`（可用 `MATE_CODING_AGENT_DIR` 覆盖）；首次启动会询问伴侣用什么语言思考和说话。第三方扩展如果通过 `PI_CODING_AGENT_DIR` 定位配置，会自动桥接到同一个目录；把 `~/.pi` 写死在自己默认值里的扩展仍需手动指过来。
 
 **从源码构建：** 需要 Node >= 22.19。每一行都是一条独立命令（不要把注释复制进命令行，cmd.exe 不把 `#` 当注释）。
 
