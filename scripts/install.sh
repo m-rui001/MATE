@@ -7,6 +7,10 @@ REPO="m-rui001/MATE"
 
 os="$(uname -s)"
 arch="$(uname -m)"
+case "$arch" in
+	x86_64|amd64) arch="x64" ;;
+	arm64|aarch64) arch="arm64" ;;
+esac
 case "$os" in
 	Darwin) platform="darwin-${arch}" ;;
 	Linux)  platform="linux-${arch}" ;;
