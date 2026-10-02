@@ -4,13 +4,12 @@
 $ErrorActionPreference = "Stop"
 
 $Repo = "m-rui001/MATE"
-$Release = "latest"
 
 $Arch = $env:PROCESSOR_ARCHITECTURE
 if ($Arch -eq "ARM64") { $platform = "windows-arm64" } else { $platform = "windows-x64" }
 
 $InstallDir = if ($env:MATE_INSTALL_DIR) { $env:MATE_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\mate" }
-$Url = "https://github.com/$Repo/releases/download/$Release/mate-$platform.zip"
+$Url = "https://github.com/$Repo/releases/latest/download/mate-$platform.zip"
 
 Write-Host "Downloading mate for $platform..."
 $Tmp = New-TemporaryFile

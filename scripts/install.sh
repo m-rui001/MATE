@@ -4,7 +4,6 @@
 set -euo pipefail
 
 REPO="m-rui001/MATE"
-RELEASE="latest"
 
 os="$(uname -s)"
 arch="$(uname -m)"
@@ -18,7 +17,7 @@ case "$platform" in
 	*) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
 esac
 
-url="https://github.com/${REPO}/releases/download/${RELEASE}/mate-${platform}.tar.gz"
+url="https://github.com/${REPO}/releases/latest/download/mate-${platform}.tar.gz"
 install_dir="${MATE_INSTALL_DIR:-$HOME/.local/share/mate}"
 bin_dir="${MATE_BIN_DIR:-$HOME/.local/bin}"
 
