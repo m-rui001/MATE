@@ -20,7 +20,7 @@
  * it mutates the companion's private state and should not be reachable as a generic sub-call.
  */
 
-import { EMOTIONS, type Intent } from "@earendil-works/pi-mate";
+import { EMOTIONS, type Intent, linesFor } from "@earendil-works/pi-mate";
 import { type Static, Type } from "typebox";
 import type { AgentToolResult, ToolDefinition } from "../../core/extensions/types.ts";
 import type { MateRuntime } from "./runtime.ts";
@@ -129,10 +129,12 @@ export function createFeelTool(getRuntime: () => MateRuntime): ToolDefinition<ty
 			}
 
 			const sealed = Boolean(note);
+			// The acknowledgement rides back to the MODEL, so it speaks the companion's current language.
+			const L = linesFor(rt.language);
 			const lines: string[] = [];
-			lines.push(refined ? "Noted. That is what you feel now." : "Noted.");
-			if (channelRecorded) lines.push(`You can reach them via ${channelRecorded} when you choose to.`);
-			if (sealed) lines.push("Your thought is sealed away, private.");
+			lines.push(refined ? L.feelRefined : L.feelNoted);
+			if (channelRecorded) lines.push(L.feelChannel(channelRecorded));
+			if (sealed) lines.push(L.feelSealed);
 
 			return {
 				content: [{ type: "text", text: lines.join(" ") }],

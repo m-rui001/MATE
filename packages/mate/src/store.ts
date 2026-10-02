@@ -10,12 +10,14 @@
  *   sealed.json   the encrypted sealed tier
  *   memory.json   the associative memory graph (see memory.ts)
  *   sessions.json the open/close autobiographical log (see session.ts)
+ *   lang.json     the prompt language the user picked (see loadLang)
  *   .sealed-key   the birth key, 0600, never leaves this machine
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { sanitiseState } from "./birth.ts";
+import { type Lang, normLang } from "./i18n.ts";
 import { type MemoryGraph, sanitiseMemory } from "./memory.ts";
 import { sanitise as sanitiseRho } from "./quantum.ts";
 import { emptySealed, loadKey, type SealedStore } from "./secret.ts";
@@ -44,6 +46,26 @@ const STATE_FILE = "state.json";
 const SEALED_FILE = "sealed.json";
 const MEMORY_FILE = "memory.json";
 const SESSIONS_FILE = "sessions.json";
+const LANG_FILE = "lang.json";
+
+/**
+ * The companion's prompt language, persisted next to the state (NOT inside it).
+ *
+ * It deliberately lives outside MateState: the state is the kernel's, replayed and duplicated by
+ * tests, and language is a HOST choice about how the kernel renders itself. Keeping it in its own
+ * small file also means choosing a language never touches the encrypted tiers or invalidates a
+ * boot catch-up. Returns null when the user has never chosen, which is what the first-run picker
+ * keys off (null means "ask", "en" means "already chose English"). Never throws.
+ */
+export function loadLang(dir: string): Lang | null {
+	const raw = readJson<{ lang?: unknown }>(join(dir, LANG_FILE));
+	if (!raw || typeof raw.lang !== "string") return null;
+	return normLang(raw.lang);
+}
+
+export function saveLang(dir: string, lang: Lang): void {
+	writeJsonAtomic(join(dir, LANG_FILE), { version: 1, lang });
+}
 
 /** Atomic JSON write: write to a temp sibling, then rename over the target. */
 export function writeJsonAtomic(path: string, data: unknown): void {

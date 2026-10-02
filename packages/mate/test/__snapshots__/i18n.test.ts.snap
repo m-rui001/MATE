@@ -1,0 +1,31 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`language invariants > freezes the English surfaces (they ride the prompt cache) 1`] = `
+"<mate-core>
+name: mate · 0d old · 12 messages lived
+nature: O.53 C.78 E.4 A.3 N.44
+character: attachmentAvoidance .3, attachmentAnxiety .35, empathy .61, curiosity .6, impulsivity .4, sensuality .4, spirituality .4, loyalty .6
+baseline: .0,.0,.0
+</mate-core>
+
+<mate>
+time: now 17:00, UTC, silent 9h (feels long)
+mood: settled pad .38,.08,-0.03 | trust.99 sadness.87 anticipation.45 disgust.44 anger.39
+drives: curiosity.73 rest.51 growth.48
+us: trust .36 close .01 respect .4 frust .54
+self: worth .54 ease .49 anxious .35 tired .41
+impulse: energy .5 burst .37 | coherence 1.42 entropy .94
+inclination: eager (+0.38) — up for this one. you choose.
+</mate>
+
+<mate>settled pad .38,.08,-0.03 trust.99 sadness.87 anticipation.45 | drives curiosity.73 rest.51 growth.48 | silent long, energy .5</mate>
+
+
+
+
+up for this one
+
+3h 12m
+
+1d 2h"
+`;

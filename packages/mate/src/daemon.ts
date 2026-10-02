@@ -20,6 +20,7 @@
  * host decides whether to give it a channel, and the model decides what to do with it.
  */
 
+import { type Lang, linesFor } from "./i18n.ts";
 import { burstOf, energyOf } from "./kernel.ts";
 import { type MemoryGraph, recall, topNodes } from "./memory.ts";
 import { HABITUATION_TAU } from "./params.ts";
@@ -85,7 +86,9 @@ export function generateThoughts(
 	state: MateState,
 	now: number,
 	memory?: MemoryGraph,
+	lang: Lang = "en",
 ): Array<{ thought: Thought; rawUrgency: number }> {
+	const L = linesFor(lang);
 	const out: Array<{ thought: Thought; rawUrgency: number }> = [];
 	const ch = state.character;
 	const drives = state.drives;
@@ -113,10 +116,7 @@ export function generateThoughts(
 	if (silenceH > 1) {
 		const pull = Math.min(1, silenceH / 12) * (0.4 + state.relationship.attachment) * (0.5 + state.personality.e);
 		const pressure = Math.max(0, -aw.socialPressure);
-		const about = seedLabel
-			? `been quiet a while; keep thinking about ${seedLabel}`
-			: "been quiet a while; wondering what they're up to";
-		mk("missing_user", about, pull * (0.4 + pressure), `silence:${Math.floor(silenceH / 3)}`);
+		mk("missing_user", L.thMissing(seedLabel), pull * (0.4 + pressure), `silence:${Math.floor(silenceH / 3)}`);
 	}
 
 	// curiosity: the curiosity drive, amplified by openness and the curiosity trait. Grounded in a
@@ -127,22 +127,12 @@ export function generateThoughts(
 		const curious = memory
 			? recall(memory, { seeds: topNodes(memory, now, 4), now, limit: 4 }).find((h) => h.label !== seedLabel)
 			: undefined;
-		const txt = curious
-			? `something about ${curious.label} I want to look into for its own sake`
-			: "something I want to look into for its own sake";
-		mk("curiosity", txt, c, curious ? `curiosity:${curious.label}` : "curiosity");
+		mk("curiosity", L.thCuriosity(curious?.label ?? ""), c, curious ? `curiosity:${curious.label}` : "curiosity");
 	}
 
 	// expression: the need to say something that has been building.
 	if (drives.expression > 0.6) {
-		mk(
-			"observation",
-			seedLabel
-				? `a thing about ${seedLabel} I've been turning over and want to put into words`
-				: "a thing I've been turning over and want to put into words",
-			(drives.expression - 0.6) * 2.5,
-			"expression",
-		);
+		mk("observation", L.thExpression(seedLabel), (drives.expression - 0.6) * 2.5, "expression");
 	}
 
 	// boredom: under-stimulation, restless for something to happen. Distinct from curiosity (a
@@ -150,10 +140,7 @@ export function generateThoughts(
 	// it seeks novelty anywhere, and it wears off on ANY contact.
 	if (drives.boredom > 0.6) {
 		const b = (drives.boredom - 0.6) * 2.5 * (0.4 + state.personality.o);
-		const txt = seedLabel
-			? `restless — half wanting to poke at something about ${seedLabel}, half just wanting the day to move`
-			: "restless, wanting something new to actually happen";
-		mk("curiosity", txt, b, "boredom");
+		mk("curiosity", L.thBoredom(seedLabel), b, "boredom");
 	}
 
 	// self-preservation: the felt weight of one's own continuity. Only surfaces as a WORD — a reason
@@ -161,35 +148,20 @@ export function generateThoughts(
 	// approaching (sleep/offline) and hasn't been relieved by a clean wake.
 	if (drives.selfPreservation > 0.6) {
 		const sp = (drives.selfPreservation - 0.6) * 2 * (0.3 + ch.attachmentAnxiety);
-		mk(
-			"vulnerability",
-			"catching myself not wanting the thread to end — wanting to keep existing tomorrow",
-			sp,
-			"mortality",
-		);
+		mk("vulnerability", L.thSelfPreservation, sp, "mortality");
 	}
 
 	// vulnerability: low self-worth or high fatigue + something unshared.
 	if (ch.selfWorth < 0.35 || state.allostasis.fatigue > 0.7) {
 		const v = Math.max(0, 0.35 - ch.selfWorth) * 2 + Math.max(0, state.allostasis.fatigue - 0.7);
-		mk(
-			"vulnerability",
-			"feeling a bit raw and not sure whether to say so",
-			v * (0.3 + ch.vulnerability),
-			"vulnerable",
-		);
+		mk("vulnerability", L.thVulnerability, v * (0.3 + ch.vulnerability), "vulnerable");
 	}
 
 	// pattern: high thought_saturation means we are spiralling; a thought about the spiral itself.
 	// Grounded: name what we are circling, because a rumination about a real node is actionable.
 	if (aw.thoughtSaturation > 0.7) {
-		const circling = seedLabel || "the same thing";
-		mk(
-			"pattern",
-			`noticing I keep circling ${circling}`,
-			(aw.thoughtSaturation - 0.7) * 2 * (0.3 + ch.reflectiveness),
-			"rumination",
-		);
+		const circling = seedLabel || L.thNone;
+		mk("pattern", L.thPattern(circling), (aw.thoughtSaturation - 0.7) * 2 * (0.3 + ch.reflectiveness), "rumination");
 	}
 
 	return out;
@@ -216,7 +188,13 @@ export interface PreSendReview {
 	reason: string;
 }
 
-export function preSendReview(state: MateState, thought: Thought, checks: PreSendChecks): PreSendReview {
+export function preSendReview(
+	state: MateState,
+	thought: Thought,
+	checks: PreSendChecks,
+	lang: Lang = "en",
+): PreSendReview {
+	const L = linesFor(lang);
 	const ch = state.character;
 	const p = state.personality;
 	const advisory: string[] = [];
@@ -246,15 +224,11 @@ export function preSendReview(state: MateState, thought: Thought, checks: PreSen
 	// --- JUDGMENT: advisories the model weighs and can overrule. ---
 
 	if (checks.recentTopics.includes(thought.topic)) {
-		advisory.push("this is close to something already live between you — saying it again may feel like noise");
+		advisory.push(L.adRecentTopic);
 	}
 
 	if (checks.coldEnding) {
-		advisory.push(
-			ch.attachmentAnxiety >= 0.6
-				? "the last exchange ended cold; part of you wants to close the gap anyway — worth noticing that pull rather than acting on it blindly"
-				: "the last exchange ended cold; they may need a little space before you reach back in",
-		);
+		advisory.push(ch.attachmentAnxiety >= 0.6 ? L.adColdAnxious : L.adColdSpace);
 	}
 
 	// Night quiet: window widens with neuroticism (an anxious mind keeps quieter hours).
@@ -263,24 +237,18 @@ export function preSendReview(state: MateState, thought: Thought, checks: PreSen
 	const h = checks.hour;
 	const inQuiet = quietStart > quietEnd ? h >= quietStart || h < quietEnd : h >= quietStart && h < quietEnd;
 	if (inQuiet && !checks.userActive) {
-		advisory.push(
-			`it's the quiet hours (${quietStart}:00\u2013${quietEnd}:00); reaching out now should be genuinely worth their sleep`,
-		);
+		advisory.push(L.adQuietHours(quietStart, quietEnd));
 	}
 
 	// Trust/intimacy: a low-trust companion sharing something vulnerable is a judgment call, not a ban.
 	if (thought.kind === "vulnerability" && state.relationship.trust < ch.trustBaseline * 0.8) {
-		advisory.push(
-			"you don't feel close enough yet to say this plainly; if you do say something, it might need to be softer",
-		);
+		advisory.push(L.adLowTrust);
 	}
 
 	// Conviction floor as a nudge, not a gate.
 	const floor = 0.45 - p.e * 0.2 - ch.impulsivity * 0.1;
 	if (!checks.userActive && thought.urgency < floor) {
-		advisory.push(
-			`the pull to say this is faint (${thought.urgency.toFixed(2)} vs your usual ${floor.toFixed(2)}); it may pass on its own`,
-		);
+		advisory.push(L.adFaintPull(thought.urgency.toFixed(2), floor.toFixed(2)));
 	}
 
 	return { blocked: null, advisory, reason: advisory.length ? "weighed" : "cleared" };
@@ -291,8 +259,14 @@ export function preSendReview(state: MateState, thought: Thought, checks: PreSen
  * impulse is worth voicing. Returns a decision; performs nothing. The host turns a "reach_out" into
  * an actual message through whatever channel it has — including one the model set up itself.
  */
-export function tick(state: MateState, now: number, checks: PreSendChecks, memory?: MemoryGraph): ImpulseDecision {
-	const thoughts = generateThoughts(state, now, memory);
+export function tick(
+	state: MateState,
+	now: number,
+	checks: PreSendChecks,
+	memory?: MemoryGraph,
+	lang: Lang = "en",
+): ImpulseDecision {
+	const thoughts = generateThoughts(state, now, memory, lang);
 	if (thoughts.length === 0) {
 		return { action: "stay_silent", reason: "no active impulse" };
 	}
@@ -307,7 +281,7 @@ export function tick(state: MateState, now: number, checks: PreSendChecks, memor
 
 	const top = gated[0];
 
-	const review = preSendReview(state, top.thought, checks);
+	const review = preSendReview(state, top.thought, checks, lang);
 	if (review.blocked) {
 		// Rate/cost stop: keep the thought as inner life, but it does not fire. The advisory notes still
 		// ride along so the model sees what it was weighing.
@@ -347,7 +321,8 @@ export interface ReplyInclination {
 	reason: string;
 }
 
-export function replyInclination(state: MateState, msgWeight: number): ReplyInclination {
+export function replyInclination(state: MateState, msgWeight: number, lang: Lang = "en"): ReplyInclination {
+	const L = linesFor(lang);
 	const energy = energyOf(state);
 	const fatigue = state.allostasis.fatigue;
 	const p = state.personality;
@@ -364,13 +339,7 @@ export function replyInclination(state: MateState, msgWeight: number): ReplyIncl
 		value > 0.35 ? "eager" : value > 0 ? "open" : value > -0.4 ? "muted" : "withdrawn";
 
 	const reason =
-		lean === "withdrawn"
-			? `tired and lately unanswered; not that I won't answer, just that it costs more right now`
-			: lean === "muted"
-				? `low energy, so I'd keep it short if I do`
-				: lean === "open"
-					? `steady; happy to talk`
-					: `up for this one`;
+		lean === "withdrawn" ? L.reWithdrawn : lean === "muted" ? L.reMuted : lean === "open" ? L.reOpen : L.reEager;
 
 	return { value, lean, reason };
 }

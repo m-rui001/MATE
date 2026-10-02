@@ -1,3 +1,7 @@
+语言 / Language: **[中文](#zh)** | **[English](#en)**
+
+<a id="en"></a>
+
 # MATE, a companion agent built on pi
 
 MATE is a public fork of [pi](https://github.com/earendil-works/pi), the minimal self-extensible
@@ -49,7 +53,16 @@ cached system-prompt prefix and is paid once per run. Only a small volatile delt
 drives, this turn's recall) rides the ephemeral `context` tail. The full design and its mapping to
 the requirements are in [COMPANION.md](COMPANION.md).
 
+The companion thinks in the language you pick. On first launch it asks 中文 or English, and
+`/language` changes it any time; the choice is persisted. Picking 中文 authors every prompt-visible
+surface in Chinese — identity block, state projection, the kernel's own thoughts, impulses, guidance
+— plus an explicit declaration that the inner voice itself is Chinese, so it thinks in Chinese
+rather than translating on the way out. A Chinese companion remembers, feels, and decides exactly
+what an English one does; only the labels move.
+
 ## Build and run
+
+Requires Node >= 22.19. There is no published package yet; run from source:
 
 ```bash
 npm install --ignore-scripts
@@ -88,7 +101,11 @@ pi code, © Mario Zechner, under the MIT license. That attribution is preserved;
 CC-BY-4.0.
 
 
+<a id="zh"></a>
+
 # MATE，一个构建在 pi 之上的伴侣代理
+
+[← English](#en)
 
 MATE 是 [pi](https://github.com/earendil-works/pi) 的公开分支，pi 是最小化的自扩展编码代理（MIT © Mario Zechner）。上游的包名、结构和 `@earendil-works/*` npm 作用域被有意保留。只有发行版被重新命名：二进制文件是 `mate` 而不是 `pi`，配置目录是 `~/.mate` 而不是 `~/.pi`，这样两者可以共存于同一台机器而不冲突。这个分支添加的是普通编码代理之下的持久内在生命。
 
@@ -112,7 +129,11 @@ MATE 保留了 pi 的能力（bash、MCP、自安装扩展、整个代理核心�
 
 为了控制成本，重且变化慢的内容（身份、性格、记忆图摘要）搭载缓存的系统提示前缀，每次运行只付一次费。只有一小段易变增量（时钟、心境、驱力、本回合的回忆）搭载短暂的 `context` 尾部。完整设计及其与需求的映射在 [COMPANION.md](COMPANION.md)。
 
+伴侣用你选的语言思考。第一次启动时它会问你要 中文 还是 English，之后随时可以用 `/language` 改；这个选择会持久保存。选了中文之后，所有进入提示词的内容都用中文书写 — 身份块、状态投影、内核自己的想法、冲动、引导 — 外加一条明确的声明：内在的声音本身就是中文的。所以它是直接用中文想，而不是想完再翻。中文伴侣记得的、感受到的、做出的决定，和英文伴侣完全一样；移动的只有标签。
+
 ## 构建和运行
+
+需要 Node >= 22.19。目前没有发布的安装包，从源码运行：
 
 ```bash
 npm install --ignore-scripts

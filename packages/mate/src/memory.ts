@@ -49,6 +49,8 @@
  * later if graphs get very large — until then a single file is atomic-written like state.json.
  */
 
+import { kv, type Lang, linesFor } from "./i18n.ts";
+
 /** A single concept node. */
 export interface MemoryNode {
 	/** Stable key derived from the surface token. Same token = same node, always. */
@@ -522,8 +524,16 @@ export function consolidate(g: MemoryGraph, now: number): MemoryGraph {
  * change so prompt caching holds. Emits: top N nodes by strength, their top edges (as "a ~ b"),
  * and one line for the most recent episode. Not the same thing as `recall` — recall is per-turn
  * and volatile; the summary is per-forever and lives in the cacheable prefix.
+ *
+ * `lang` labels the three lines only. Node order, strengths and edge weights are untouched, so a
+ * Chinese companion remembers exactly what the English one does.
  */
-export function summary(g: MemoryGraph, opts: { nodes?: number; edges?: number; maxChars?: number } = {}): string {
+export function summary(
+	g: MemoryGraph,
+	opts: { nodes?: number; edges?: number; maxChars?: number; lang?: Lang } = {},
+): string {
+	const lang = opts.lang ?? "en";
+	const L = linesFor(lang);
 	const topN = opts.nodes ?? 12;
 	const topE = opts.edges ?? 10;
 	const nodeKeys = Object.values(g.nodes)
@@ -540,10 +550,10 @@ export function summary(g: MemoryGraph, opts: { nodes?: number; edges?: number; 
 			return `${la} ${sign}${Math.abs(e.weight).toFixed(2)} ${lb}`;
 		});
 	const lines: string[] = [];
-	if (nodeKeys.length) lines.push(`nodes: ${nodeKeys.join(", ")}`);
-	if (edgeLines.length) lines.push(`ties: ${edgeLines.join(" | ")}`);
+	if (nodeKeys.length) lines.push(kv(L.memoryNodes, nodeKeys.join(L.sep), lang));
+	if (edgeLines.length) lines.push(kv(L.memoryTies, edgeLines.join(" | "), lang));
 	const recent = g.episodes[g.episodes.length - 1];
-	if (recent) lines.push(`recent: ${trim(recent.text, 90)}`);
+	if (recent) lines.push(kv(L.memoryRecent, trim(recent.text, 90), lang));
 	if (lines.length === 0) return "";
 	const body = `<mate-memory>\n${lines.join("\n")}\n</mate-memory>`;
 	const max = opts.maxChars ?? 900;

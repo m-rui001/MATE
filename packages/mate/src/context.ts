@@ -17,9 +17,26 @@
  * ~73-token budget: it can actually describe the state (P2) without every token being re-paid on
  * every message forever. Quantise + name-don't-number still apply — the block is felt, not narrated.
  * The sealed parts (secret.ts) never enter either projection; only a count is surfaced.
+ *
+ * LANGUAGE: both surfaces take `lang`, which changes LABELS ONLY. Thresholds, ordering, values and the
+ * whole affective computation are language-independent, so a Chinese companion feels precisely what the
+ * English one feels. This matters more than it sounds: the projection is the mind's mirror, and a
+ * mirror in English produces an inner voice in English (see i18n.ts for the reasoning).
  */
 
 import type { ReplyInclination } from "./daemon.ts";
+import {
+	driveGloss,
+	emotionGloss,
+	feelGloss,
+	fmtDur,
+	kv,
+	type Lang,
+	leanGloss,
+	linesFor,
+	moodGloss,
+	traitGloss,
+} from "./i18n.ts";
 import { burstOf, energyOf, noticeThreshold, perceivedDuration, temporalMood } from "./kernel.ts";
 import { type MemoryGraph, summary as memorySummary, type RecallHit } from "./memory.ts";
 import { diagonalEntropy, totalCoherence } from "./quantum.ts";
@@ -40,6 +57,8 @@ export interface ContextOptions {
 	session?: string;
 	/** Max characters for the whole block; the projector trims lowest-signal channels first. */
 	maxChars?: number;
+	/** Prompt language for the labels (default "en"). Never affects a number or an ordering. */
+	lang?: Lang;
 }
 
 /** Options for the stable, cacheable prefix. */
@@ -53,6 +72,8 @@ export interface StableContextOptions {
 	memoryEdges?: number;
 	/** Max characters for the whole block. */
 	maxChars?: number;
+	/** Prompt language for the labels (default "en"). */
+	lang?: Lang;
 }
 
 /** Round to 2 decimals and drop trailing zero, e.g. 0.40 -> ".4". */
@@ -66,18 +87,28 @@ function pad(pad: PAD): string {
 	return `${q(pad.p)},${q(pad.a)},${q(pad.d)}`;
 }
 
-/** Top-N non-trivial channels, as "name.value" tokens sorted by magnitude. */
-function topChannels(values: Record<string, number> | object, floor = 0.12, n = 4): string {
-	const entries = Object.entries(values as Record<string, number>)
+/** Top-N non-trivial channels, as "name.value" tokens sorted by magnitude, glossed for `lang`. */
+function topChannels(values: Record<string, number> | object, floor: number, n: number, lang: Lang): string {
+	return Object.entries(values as Record<string, number>)
 		.filter(([, v]) => typeof v === "number" && v >= floor)
 		.sort((a, b) => b[1] - a[1])
 		.slice(0, n)
-		.map(([k, v]) => `${k}${q(v)}`);
-	return entries.join(" ");
+		.map(([k, v]) => `${emotionGloss(k, lang)}${q(v)}`)
+		.join(" ");
 }
 
-/** One-word mood gloss, so the LLM has a handle it can speak to without doing arithmetic. */
-function moodWord(m: PAD): string {
+/** Drive channels, glossed from the drive table rather than the emotion table. */
+function topDrives(drives: object, floor: number, n: number, lang: Lang): string {
+	return Object.entries(drives as Record<string, number>)
+		.filter(([, v]) => typeof v === "number" && v >= floor)
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, n)
+		.map(([k, v]) => `${driveGloss(k, lang)}${q(v)}`)
+		.join(" ");
+}
+
+/** The mood branch this state sits in; the WORD is chosen per language from the branch. */
+function moodKey(m: PAD): string {
 	const { p, a } = m;
 	if (p > 0.4 && a > 0.3) return "buoyant";
 	if (p > 0.4) return "warm";
@@ -89,14 +120,22 @@ function moodWord(m: PAD): string {
 	return "heavy";
 }
 
+/** One-word mood gloss, so the LLM has a handle it can speak to without doing arithmetic. */
+function moodWord(m: PAD, lang: Lang): string {
+	return moodGloss(moodKey(m), lang);
+}
+
 /** Core character traits, rendered as name.value with a floor so only meaningful ones show. */
-function topTraits(ch: MateState["character"], floor = 0.55, n = 8): string {
-	const entries = Object.entries(ch)
-		.filter(([k, v]) => k !== "optimismBias" && typeof v === "number" && (v >= floor || v <= 1 - floor))
-		.sort((a, b) => Math.abs(b[1] - 0.5) - Math.abs(a[1] - 0.5))
-		.slice(0, n)
-		.map(([k, v]) => `${k} ${q(v)}`);
-	return entries.join(", ");
+function topTraits(ch: MateState["character"], floor = 0.55, n = 8, lang: Lang = "en"): string {
+	return (
+		Object.entries(ch)
+			.filter(([k, v]) => k !== "optimismBias" && typeof v === "number" && (v >= floor || v <= 1 - floor))
+			.sort((a, b) => Math.abs(b[1] - 0.5) - Math.abs(a[1] - 0.5))
+			.slice(0, n)
+			.map(([k, v]) => `${traitGloss(k, lang)} ${q(v)}`)
+			// Chinese separates with a space: an ASCII comma between CJK labels costs a token and reads as noise.
+			.join(lang === "zh" ? " " : ", ")
+	);
 }
 
 /**
@@ -107,26 +146,32 @@ function topTraits(ch: MateState["character"], floor = 0.55, n = 8): string {
  */
 export function stableContext(state: MateState, opts: StableContextOptions = {}): string {
 	const p = state.personality;
+	const lang: Lang = opts.lang ?? "en";
+	const L = linesFor(lang);
 	const lines: string[] = [];
 
 	// Identity: name + how long this self has existed (continuity of being).
 	const days = Math.max(0, Math.floor((state.t - state.born) / 86_400_000));
-	lines.push(`name: ${opts.name ?? "mate"} · ${days}d old · ${state.counters.messages} messages lived`);
+	lines.push(L.identity(opts.name ?? "mate", days, state.counters.messages));
 
 	// Personality (Big Five): fixed per message, drifts only weekly → cacheable.
-	lines.push(`nature: O${q(p.o)} C${q(p.c)} E${q(p.e)} A${q(p.a)} N${q(p.n)}`);
+	lines.push(kv(L.nature, `O${q(p.o)} C${q(p.c)} E${q(p.e)} A${q(p.a)} N${q(p.n)}`, lang));
 
 	// Character (SOUL): the nurture layer, only the pronounced traits.
-	const traits = topTraits(state.character);
-	if (traits) lines.push(`character: ${traits}`);
+	const traits = topTraits(state.character, 0.55, 8, lang);
+	if (traits) lines.push(kv(L.character, traits, lang));
 
 	// Baseline disposition: the slow PAD set-point the mood oscillates around.
 	const b = state.allostasis.baselineShift;
-	lines.push(`baseline: ${q(b.p)},${q(b.a)},${q(b.d)}`);
+	lines.push(kv(L.baseline, `${q(b.p)},${q(b.a)},${q(b.d)}`, lang));
 
 	// Memory-graph summary: top concepts by strength + strongest ties. Changes slowly.
 	if (opts.memory) {
-		const summary = memorySummary(opts.memory, { nodes: opts.memoryNodes ?? 12, edges: opts.memoryEdges ?? 10 });
+		const summary = memorySummary(opts.memory, {
+			nodes: opts.memoryNodes ?? 12,
+			edges: opts.memoryEdges ?? 10,
+			lang,
+		});
 		if (summary) lines.push(summary);
 	}
 
@@ -143,54 +188,88 @@ export function stableContext(state: MateState, opts: StableContextOptions = {})
  */
 export function stateContext(state: MateState, opts: ContextOptions = {}): string {
 	const now = opts.now ?? state.t;
+	const lang: Lang = opts.lang ?? "en";
+	const L = linesFor(lang);
 	const gap = now - state.lastInteraction;
 	const perceived = perceivedDuration(state, gap);
-	const temporal = temporalMood(perceived);
+	const temporal = feelGloss(temporalMood(perceived), lang);
 	const tz = opts.tz;
 	const clock = new Date(now);
 	const hhmm = `${String(clock.getHours()).padStart(2, "0")}:${String(clock.getMinutes()).padStart(2, "0")}`;
 	const energy = energyOf(state);
 	const burst = burstOf(state);
 
-	const emo = topChannels(state.emotions, 0.1, 5);
-	const drives = topChannels(state.drives, 0.2, 7);
+	const emo = topChannels(state.emotions, 0.1, 5, lang);
+	const drives = topDrives(state.drives, 0.2, 7, lang);
 	const coherence = totalCoherence(state.rho);
 	const entropy = diagonalEntropy(state.rho);
 
 	const lines: string[] = [];
 	// Time metadata: the user explicitly wants the companion to see time. Kept to one line.
-	const timeBits = [`now ${hhmm}`];
+	const timeBits = [L.now(hhmm)];
 	if (tz) timeBits.push(tz);
-	timeBits.push(`silent ${fmtDur(gap)} (feels ${temporal})`);
-	if (opts.gapLabel) timeBits.push(`woke after ${opts.gapLabel} off`);
-	lines.push(`time: ${timeBits.join(", ")}`);
+	timeBits.push(L.silent(fmtDur(gap, lang), temporal));
+	if (opts.gapLabel) timeBits.push(L.wokeAfter(opts.gapLabel));
+	lines.push(kv(L.time, timeBits.join(L.sep), lang));
 
 	// Open/close awareness: when THIS body was woken, how often today, when it last closed (session.ts).
 	// Distinct from the message gap above — this is PROCESS lifetime, not conversation silence.
-	if (opts.session) lines.push(`body: ${opts.session}`);
+	if (opts.session) lines.push(kv(L.body, opts.session, lang));
 
-	lines.push(`mood: ${moodWord(state.mood)} pad ${pad(state.mood)}${emo ? ` | ${emo}` : ""}`);
-	if (drives) lines.push(`drives: ${drives}`);
+	lines.push(`${kv(L.mood, moodWord(state.mood, lang), lang)} ${L.pad} ${pad(state.mood)}${emo ? ` | ${emo}` : ""}`);
+	if (drives) lines.push(kv(L.drives, drives, lang));
 
 	// Relationship + self, one line each, only the channels that matter right now.
 	const rel = state.relationship;
 	lines.push(
-		`us: trust ${q(rel.trust)} close ${q(rel.attachment)} respect ${q(rel.respect)}${rel.frustration > 0.2 ? ` frust ${q(rel.frustration)}` : ""}${rel.unanswered ? ` ignored x${rel.unanswered}` : ""}`,
+		kv(
+			L.us,
+			[
+				kv(L.trust, q(rel.trust), lang),
+				kv(L.close, q(rel.attachment), lang),
+				kv(L.respect, q(rel.respect), lang),
+				rel.frustration > 0.2 ? kv(L.frust, q(rel.frustration), lang) : "",
+				rel.unanswered ? L.ignored(rel.unanswered) : "",
+			]
+				.filter(Boolean)
+				.join(" "),
+			lang,
+		),
 	);
 	const ch = state.character;
 	lines.push(
-		`self: worth ${q(ch.selfWorth)} ease ${q(ch.selfEfficacy)} anxious ${q(ch.attachmentAnxiety)} tired ${q(state.allostasis.fatigue)}`,
+		kv(
+			L.self,
+			[
+				kv(L.worth, q(ch.selfWorth), lang),
+				kv(L.ease, q(ch.selfEfficacy), lang),
+				kv(L.anxious, q(ch.attachmentAnxiety), lang),
+				kv(L.tired, q(state.allostasis.fatigue), lang),
+			].join(" "),
+			lang,
+		),
 	);
 
 	// Energy governs verbosity; burst governs whether to split into several short messages.
-	lines.push(`impulse: energy ${q(energy)} burst ${q(burst)} | coherence ${q(coherence)} entropy ${q(entropy)}`);
+	lines.push(
+		kv(
+			L.impulse,
+			[
+				kv(L.energy, q(energy), lang),
+				kv(L.burst, q(burst), lang),
+				"|",
+				kv(L.coherence, q(coherence), lang),
+				kv(L.entropy, q(entropy), lang),
+			].join(" "),
+			lang,
+		),
+	);
 
 	// P1: the reply inclination is a SIGNAL the model reads and may overrule — not a decision made for it.
 	if (opts.inclination) {
 		const inc = opts.inclination;
-		lines.push(
-			`inclination: ${inc.lean} (${inc.value >= 0 ? "+" : ""}${inc.value.toFixed(2)}) — ${inc.reason}. you choose.`,
-		);
+		const value = `${inc.value >= 0 ? "+" : ""}${inc.value.toFixed(2)}`;
+		lines.push(kv(L.inclination, L.inclinationLine(leanGloss(inc.lean, lang), value, inc.reason), lang));
 	}
 
 	// P4: specific memories this message stirred, surfaced ephemerally (the summary lives in the cache).
@@ -198,13 +277,13 @@ export function stateContext(state: MateState, opts: ContextOptions = {}): strin
 		const hits = opts.recall
 			.slice(0, 5)
 			.map((h) => `${h.label}${h.hop > 0 ? `~${h.hop}` : ""}${h.sealed ? "🔒" : ""}`)
-			.join(", ");
-		lines.push(`recalled: ${hits}`);
+			.join(L.sep);
+		lines.push(kv(L.recalled, hits, lang));
 	}
 
 	// The single most recent self-observation, if any: continuity of inner life across turns.
 	const lastObs = state.observations[state.observations.length - 1];
-	if (lastObs) lines.push(`last thought: ${truncate(lastObs, 90)}`);
+	if (lastObs) lines.push(kv(L.lastThought, truncate(lastObs, 90), lang));
 
 	const body = `<mate>\n${lines.join("\n")}\n</mate>`;
 	const max = opts.maxChars ?? 1400;
@@ -216,30 +295,25 @@ export function stateContext(state: MateState, opts: ContextOptions = {}): strin
  * token counts even more. Roughly half the size of stateContext.
  */
 export function minimalContext(state: MateState, opts: ContextOptions = {}): string {
+	const lang: Lang = opts.lang ?? "en";
+	const L = linesFor(lang);
 	const now = opts.now ?? state.t;
-	const temporal = temporalMood(perceivedDuration(state, now - state.lastInteraction));
-	const emo = topChannels(state.emotions, 0.15, 3);
-	const drives = topChannels(state.drives, 0.3, 3);
+	const temporal = feelGloss(temporalMood(perceivedDuration(state, now - state.lastInteraction)), lang);
+	const emo = topChannels(state.emotions, 0.15, 3, lang);
+	const drives = topDrives(state.drives, 0.3, 3, lang);
 	const lines = [
-		`${moodWord(state.mood)} pad ${pad(state.mood)}${emo ? ` ${emo}` : ""}`,
-		drives ? `drives ${drives}` : "",
-		`silent ${temporal}, energy ${q(energyOf(state))}`,
-	].filter(Boolean);
-	return `<mate>${lines.join(" | ")}</mate>`;
+		`${moodWord(state.mood, lang)} ${L.pad} ${pad(state.mood)}${emo ? ` ${emo}` : ""}`,
+		drives ? `${L.drivesBare} ${drives}` : "",
+		L.miniSilent(temporal, q(energyOf(state))),
+	]
+		.filter(Boolean)
+		.join(" | ");
+	return `<mate>${lines}</mate>`;
 }
 
 /** Notice threshold for drive-delta self-observations, exposed for the daemon. */
 export function driveNoticeThreshold(state: MateState): number {
 	return noticeThreshold(state.personality.n);
-}
-
-function fmtDur(ms: number): string {
-	const m = Math.round(ms / 60_000);
-	if (m < 1) return "<1m";
-	if (m < 60) return `${m}m`;
-	const h = Math.floor(m / 60);
-	if (h < 24) return `${h}h`;
-	return `${Math.floor(h / 24)}d`;
 }
 
 function truncate(s: string, n: number): string {

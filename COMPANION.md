@@ -29,6 +29,7 @@ whether or not anyone is talking to it.
 | Short, natural language; avoid "AI flavor" | system-prompt persona + `companion` section | "reply like a person texting"; state is *felt*, not narrated |
 | Boot catch-up (the machine powers off) | `mate/src/catchup.ts` | closed-form integration across the gap, O(1) over any duration |
 | Minimize per-conversation token cost | `context.ts`, `index.ts` | P2+P5: big STABLE content (identity, character, memory summary) rides a CACHED prompt section paid once; only a small VOLATILE delta rides the ephemeral `context` tail, so it is free to be rich |
+| Thinks in Chinese when the user picks Chinese (first-run picker + `/language`) | `mate/src/i18n.ts`, `runtime.ts`, `index.ts`, `appraisal.ts` | the whole prompt surface is authored in the chosen language — projections, kernel thoughts, advisories, impulses, guidance + an explicit thinking-language declaration; choice persisted in `lang.json` (outside MateState, `null` = never chosen) |
 
 ---
 
@@ -197,6 +198,7 @@ node dist/bundle/cli.js           # the companion; bin is `pi`/`mate`
 ```
 
 - `/mate` — public mood/drives snapshot (never shows sealed data).
+- `/language` — pick the companion's thinking/speaking language (中文 / English); first launch prompts, and the choice persists in `lang.json`.
 - `feel` — the model's tool to refine its affective read and record channels it found for itself.
 - State persists in `~/.mate/agent/mate/` (override with `MATE_CODING_AGENT_DIR`).
 
@@ -212,8 +214,9 @@ npm scope is intentionally left unchanged — renaming it would churn the lockfi
 collision benefit, since the package is never installed as `pi`. A rebrand also means `isOfficialDistribution()`
 returns false, which correctly disables pi's experimental first-time-setup wizard for this build.
 
-Checks that pass: `tsc --noEmit` (whole monorepo), `biome check` on the mate files, 18/18 kernel unit
-tests, `check:runtime-deps`, `check:ts-imports`, and a full bundle build (73 files).
+Checks that pass: `tsc --noEmit` (whole monorepo), `biome check` on the mate files, 37/37 kernel unit
+tests (including the i18n invariants), `check:runtime-deps`, `check:ts-imports`, and a full bundle
+build (73 files).
 
 ---
 
@@ -248,6 +251,23 @@ tests, `check:runtime-deps`, `check:ts-imports`, and a full bundle build (73 fil
   让它自己发现", there is deliberately no enable-flag or permission gate; the guidance tells it to look
   when something specifically made it curious, not on a timer. Reaching out and looking are DISCOVERED
   capabilities, not built-in features.
+- **Language is a LABEL layer, authored in-language — not a translation pass or a "please think in
+  Chinese" instruction.** When the user picks 中文, every prompt-visible string (identity block, state
+  projection, the kernel's own thoughts, pre-send advisories, impulses, guidance) is Chinese from the
+  start, plus an explicit `DECLARATION` that the inner voice is Chinese. The research reason: an
+  instruction bolted onto an English prompt does not hold — reasoning-language tracks the PROMPT
+  language, and models drift back toward English mid-answer, so the whole surface must be authored in
+  the target language. Design guarantees enforced by `test/i18n.test.ts`: the kernel stays pure (`lang`
+  is an argument, never read from env/fs); the affective computation is language-independent, so a
+  Chinese companion feels and decides exactly what the English one does (a test asserts every number
+  matches line-for-line across languages); the English surfaces are byte-frozen by a snapshot so an
+  existing companion's prompt cache is not invalidated gratuitously. `lang` lives OUTSIDE `MateState`
+  (its own `lang.json`) because state is test-replayed; `loadLang` returns `null` = never-chosen, which
+  drives the first-run picker and is distinct from an explicit `en`. Switching languages rewrites the
+  cached stable section, so it costs ONE prompt-cache miss on the switch, then holds again. The
+  bilingual README (`#en` / `#zh` anchors) and `/language` are user-facing; `/language` cannot shadow a
+  built-in (there is none) and a third-party collision only renames ours, so plugin install stays
+  compatible.
 - **pi update detection is gated to the official build.** `checkForNewPiVersion` now only runs when
   `IS_OFFICIAL_DISTRIBUTION` — a `mate` rebrand must not ping `pi.dev` and misreport a "pi" update.
 - **No built-in reach-out action.** Email/webhook/scheduling are *not* implemented. The heartbeat

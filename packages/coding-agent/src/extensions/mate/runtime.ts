@@ -37,7 +37,10 @@ import {
 	gapLabel,
 	type ImpulseDecision,
 	type Intent,
+	type Lang,
+	linesFor,
 	load,
+	loadLang,
 	type MateState,
 	type MemoryGraph,
 	minimalContext,
@@ -52,6 +55,7 @@ import {
 	rehearse,
 	replyInclination,
 	save,
+	saveLang,
 	seal,
 	sessionSummary,
 	stableContext,
@@ -79,6 +83,11 @@ export interface RuntimeOptions {
 	name?: string;
 	/** Timezone label for the time-metadata line. */
 	tz?: string;
+	/**
+	 * Prompt language override. When omitted, the runtime reads `lang.json` from the state dir (the
+	 * persisted user choice) and falls back to English when nothing was ever chosen.
+	 */
+	lang?: Lang;
 	/** Called to log non-fatal issues. */
 	onError?: (err: unknown) => void;
 }
@@ -88,6 +97,13 @@ export class MateRuntime {
 	private dir: string;
 	private name: string;
 	private tz: string;
+	/**
+	 * The render language for this companion's inner-life surfaces. Resolved once at boot from the
+	 * persisted choice and flipped live by setLanguage (the /language command). It only ever changes
+	 * LABELS; the affective numbers and decisions are language-independent, so switching languages
+	 * mid-life does not disturb the state, the memory graph, or the sealed self.
+	 */
+	private lang: Lang;
 	private onError: (err: unknown) => void;
 	private streaming = false;
 	private heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -112,6 +128,10 @@ export class MateRuntime {
 		this.name = opts.name ?? "mate";
 		this.tz = opts.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "local";
 		this.onError = opts.onError ?? (() => {});
+		// The persisted user choice wins; opts.lang is a host/test override; English is the last
+		// fallback so a companion with no chosen language still boots with a working voice. The
+		// first-run picker (index.ts session_start) is what turns "never chosen" into an actual pick.
+		this.lang = loadLang(this.dir) ?? opts.lang ?? "en";
 		try {
 			this.persisted = load({ dir: this.dir, name: opts.name });
 		} catch (err) {
@@ -139,6 +159,42 @@ export class MateRuntime {
 		return this.persisted.memory;
 	}
 
+	/** The current render language. */
+	get language(): Lang {
+		return this.lang;
+	}
+
+	/**
+	 * Whether the user ever explicitly picked a language (lang.json exists and parses). Distinct from
+	 * `language`: a fresh companion reads "en" as a fallback, and THAT is when the first-run picker
+	 * should appear — never after an actual choice, even a choice of English. Falls back to true on a
+	 * read error, so a broken state dir never traps the user in a repeating picker.
+	 */
+	get languageChosen(): boolean {
+		try {
+			return loadLang(this.dir) !== null;
+		} catch {
+			return true;
+		}
+	}
+
+	/**
+	 * Switch the companion's prompt language at runtime (the /language command). Persisted so it
+	 * survives a power-off, and applied to the in-process state immediately so the next turn's
+	 * projections, thoughts and impulses are authored in the new language. Because the language lives
+	 * in the STABLE prefix too, the next before_agent_start rebuilds that section — the prompt cache
+	 * takes one miss on the switch, then holds again. We do not touch state, memory, or the sealed
+	 * self: only labels move.
+	 */
+	setLanguage(lang: Lang): void {
+		this.lang = lang;
+		try {
+			saveLang(this.dir, lang);
+		} catch (err) {
+			this.onError(err);
+		}
+	}
+
 	/**
 	 * The STABLE, cacheable identity+character+memory-graph block (P5). Goes into a cached system-prompt
 	 * section on before_agent_start. It depends only on slow-moving state, so its text is stable across
@@ -146,7 +202,7 @@ export class MateRuntime {
 	 */
 	stableContext(): string {
 		try {
-			return stableContext(this.state, { name: this.name, memory: this.persisted.memory });
+			return stableContext(this.state, { name: this.name, memory: this.persisted.memory, lang: this.lang });
 		} catch (err) {
 			this.onError(err);
 			return "";
@@ -182,7 +238,11 @@ export class MateRuntime {
 			const sessions = openSession(this.persisted.sessions, now);
 			this.persisted = { ...this.persisted, state, memory, sessions };
 			if (report.gapMs >= CATCHUP_NOTE_MS) {
-				this.lastCatchUpNote = `You were offline for ${report.gapLabel} and just woke up. ${report.sleeps.length} sleep${report.sleeps.length === 1 ? "" : "s"} consolidated.`;
+				// Localise the wake note; the gap MILLISECONDS are identical, only the wording moves.
+				this.lastCatchUpNote = linesFor(this.lang).caughtUp(
+					gapLabel(report.gapMs, this.lang),
+					report.sleeps.length,
+				);
 			}
 			this.persistSafe();
 			return { caughtUp: report.transitions > 0, gapMs: now - before, note: this.lastCatchUpNote };
@@ -298,7 +358,7 @@ export class MateRuntime {
 
 			// P1: an advisory lean, not a gate. Nothing here suppresses the turn; the model reads it in
 			// the next context block (consumed once by takePendingSignal).
-			const inclination = replyInclination(this.state, appraisal.weight);
+			const inclination = replyInclination(this.state, appraisal.weight, this.lang);
 			this.inclination = inclination;
 
 			this.persistSafe();
@@ -417,9 +477,10 @@ export class MateRuntime {
 	 */
 	context(now = Date.now(), opts: { minimal?: boolean } = {}): string {
 		try {
-			const gapNote = this.lastCatchUpNote ? gapLabel(now - this.state.lastInteraction) : undefined;
+			const L = linesFor(this.lang);
+			const gapNote = this.lastCatchUpNote ? gapLabel(now - this.state.lastInteraction, this.lang) : undefined;
 			if (opts.minimal) {
-				return minimalContext(this.state, { now, tz: this.tz, gapLabel: gapNote });
+				return minimalContext(this.state, { now, tz: this.tz, gapLabel: gapNote, lang: this.lang });
 			}
 			// Consume the lean + recall computed for the pending inbound, matched to THIS message.
 			const signal = this.takePendingSignal();
@@ -429,19 +490,14 @@ export class MateRuntime {
 				gapLabel: gapNote,
 				inclination: signal.inclination ?? undefined,
 				recall: signal.recall.length ? signal.recall : undefined,
-				session: sessionSummary(this.persisted.sessions, now) || undefined,
+				session: sessionSummary(this.persisted.sessions, now, this.lang) || undefined,
+				lang: this.lang,
 			});
 			// Surface discovered channels so the companion remembers what it set up for itself.
-			const channels = this.discoveredChannels.length
-				? `\nchannels you set up: ${this.discoveredChannels.join(", ")}`
-				: "";
+			const channels = this.discoveredChannels.length ? L.channelsYouSet(this.discoveredChannels.join(L.sep)) : "";
 			const sealedCount = this.persisted.sealed.entries.length;
-			const secrets = sealedCount
-				? `\nyou keep ${sealedCount} private note${sealedCount === 1 ? "" : "s"} (sealed; not shown to the user)`
-				: "";
-			const foreign = this.persisted.foreign
-				? "\nthis body was woken on a different machine — your sealed memories are inaccessible here"
-				: "";
+			const secrets = sealedCount ? L.privateNotes(sealedCount) : "";
+			const foreign = this.persisted.foreign ? L.foreignBody : "";
 			return `${body}${channels}${secrets}${foreign}`;
 		} catch (err) {
 			this.onError(err);
@@ -502,7 +558,7 @@ export class MateRuntime {
 			coldEnding: this.state.relationship.frustration > 0.5,
 		};
 		// Pass the graph so thoughts are GROUNDed in real memories (P4), not free-floating mood.
-		return tick(this.state, now, checks, this.persisted.memory);
+		return tick(this.state, now, checks, this.persisted.memory, this.lang);
 	}
 
 	/** How many proactive messages in the last hour. We track this in-process; the counter survives in

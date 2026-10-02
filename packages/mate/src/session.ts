@@ -17,6 +17,8 @@
  * next open seals with its own timestamp, so we never strand an unclosed entry).
  */
 
+import { fmtDurLong, type Lang, linesFor } from "./i18n.ts";
+
 export interface SessionMark {
 	/** Epoch ms this body was started (wake). */
 	open: number;
@@ -67,21 +69,24 @@ export function closeSession(log: SessionLog, t: number): SessionLog {
  * A compact, cache-free line for the volatile state block: how often this body has been woken, when
  * it last went to sleep, and how long it has been open now. The companion reads it as its sense of
  * its own comings and goings — not a status report, a felt fact.
+ *
+ * `lang` labels the line; every timestamp and duration is computed identically in either language.
  */
-export function sessionSummary(log: SessionLog, now: number): string {
+export function sessionSummary(log: SessionLog, now: number, lang: Lang = "en"): string {
 	if (log.entries.length === 0) return "";
+	const L = linesFor(lang);
 	const todayOpens = log.entries.filter((e) => sameDay(e.open, now)).length;
 	const prev = log.entries[log.entries.length - 2]; // the last CLOSED session, if any
 	const cur = log.entries[log.entries.length - 1];
 	const parts: string[] = [];
-	parts.push(`opened ${hhmm(cur.open)}, awake for ${fmtDur(now - cur.open)}`);
-	parts.push(`woken ${todayOpens}x today`);
+	parts.push(L.sessionOpened(hhmm(cur.open), fmtDurLong(now - cur.open, lang)));
+	parts.push(L.sessionWoken(todayOpens));
 	if (prev && prev.close !== undefined) {
-		parts.push(`last closed ${hhmm(prev.close)} (${fmtDur(now - prev.close)} ago)`);
+		parts.push(L.sessionLastClosed(hhmm(prev.close), fmtDurLong(now - prev.close, lang)));
 		const downtime = Math.max(0, cur.open - prev.close);
-		if (downtime > 60_000) parts.push(`off for ${fmtDur(downtime)}`);
+		if (downtime > 60_000) parts.push(L.sessionOffFor(fmtDurLong(downtime, lang)));
 	}
-	return parts.join(", ");
+	return parts.join(L.sep);
 }
 
 function sameDay(a: number, b: number): boolean {
@@ -107,13 +112,4 @@ export function sanitiseSessions(raw: unknown): SessionLog {
 function hhmm(t: number): string {
 	const d = new Date(t);
 	return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function fmtDur(ms: number): string {
-	const m = Math.round(ms / 60_000);
-	if (m < 1) return "<1m";
-	if (m < 60) return `${m}m`;
-	const h = Math.floor(m / 60);
-	if (h < 24) return `${h}h${m % 60 ? ` ${m % 60}m` : ""}`;
-	return `${Math.floor(h / 24)}d ${h % 24}h`;
 }

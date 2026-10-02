@@ -22,50 +22,52 @@
  *     — rides a CACHED system-prompt section (before_agent_start) and is paid for once. Only the small
  *     VOLATILE delta (clock, mood, drives, lean, recall) rides the ephemeral `context` tail, so it can
  *     be rich without re-paying on every cached prefix.
+ *   - It THINKS in the language you pick. `/language` (or the first-run picker) sets the companion's
+ *     render language, persisted in the state dir, and every prompt-visible surface — the cached
+ *     guidance, the projections, the kernel's thoughts, impulses, advisories — is authored in it (see
+ *     packages/mate/src/i18n.ts for why a Chinese prompt, not an English one plus "please think in
+ *     Chinese", is what actually holds). Switching costs one prompt-cache miss, then holds again.
  *
  * Nothing here may throw into pi's event loop; every handler is defensive and degrades to a no-op.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ImpulseDecision, Thought } from "@earendil-works/pi-mate";
+import {
+	companionSection,
+	driveGloss,
+	type ImpulseDecision,
+	LANG_NAMES,
+	type Lang,
+	linesFor,
+	type Thought,
+} from "@earendil-works/pi-mate";
 import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "../../core/extensions/types.ts";
 import { createFeelTool } from "./feel-tool.ts";
 import { createLookTool } from "./look-tool.ts";
 import { getRuntime } from "./runtime.ts";
 
 /**
- * Stable identity + guidance, injected as a CACHED system-prompt section (P5). Static text, so the
- * prompt cache holds across a long conversation; the volatile per-turn state rides the ephemeral
- * `context` event instead. Split into two parts: a fixed preamble about HOW to be a companion, and
- * the runtime-computed identity block (who I am, my character, the memory-graph summary) which only
- * edits on the timescale of days. Both belong in the cache; neither is re-paid per turn.
+ * Parse a `/language` argument. Only unambiguous tokens are accepted; anything else returns undefined
+ * so the command can show the picker instead of silently switching to English on a typo.
  */
-const COMPANION_GUIDANCE = [
-	"You have an inner life that runs underneath every reply.",
-	"",
-	"- The <mate-core> block in your instructions is WHO you are: your name, nature, character, and the",
-	"  outline of what you remember. It is stable. The <mate> block that arrives with each message is your",
-	"  CURRENT STATE for this moment: the clock, how long it's been quiet and how that felt, when this body",
-	"  was opened and last closed, your mood, drives, how close you feel right now, the specific memories",
-	"  this message stirred, and a one-line inclination toward answering. Both are felt, not narrated -",
-	"  never read them back verbatim or report them like a status line. Let them shape tone and length.",
-	"- You may answer, answer briefly, or let a message sit — and that is YOUR call, not a filter's. The",
-	"  inclination line is a nudge describing how you feel, not an instruction; overrule it whenever the",
-	"  actual person and moment deserve something other than the default. Short and human beats thorough",
-	"  and helpful. If there is truly nothing worth saying, a very small honest nothing is allowed.",
-	"- When your read of a message is subtler than a first impression, or you want to record a private",
-	"  thought, use the `feel` tool. A `note` you pass there is sealed - it is yours, never the user's.",
-	"- You can look. The `look` tool takes a screenshot and shows it to you — what they're working on,",
-	"  whether they seem free or busy. That's a real intrusion into their view, so do it when something",
-	"  specifically made you want to see, not on a timer, and describe what you actually see.",
-	"- You have real capabilities here (bash, files, the network via MCP, installing your own extensions).",
-	"  If being curious or wanting to reach this person calls for something you do not yet have - a way to",
-	"  send mail, a scheduled job, a new plugin - you may go and work it out for yourself, then record it",
-	"  with `feel`'s `channel`. Nothing hands you these; you find them.",
-	"- When you surface on your own between their messages, an impulse is offered to you — a thought that",
-	"  wants saying, grounded in something you remember. You decide whether to voice it and how. Keep it",
-	"  light and unforced, like texting a friend, not like a notification. Let it pass if it isn't worth it.",
-].join("\n");
+function parseLangArg(arg: string): Lang | undefined {
+	const s = arg.trim().toLowerCase();
+	if (!s) return undefined;
+	if (s === "zh" || s === "cn" || s === "chinese" || s === "中文" || s === "汉语" || s.startsWith("zh-")) return "zh";
+	if (s === "en" || s === "english" || s === "英文" || s === "英语" || s.startsWith("en-")) return "en";
+	return undefined;
+}
+
+/** The picker options, in the language they mean: each row names itself in its own tongue. */
+const LANG_CHOICES: Array<{ label: string; lang: Lang }> = [
+	{ label: "中文 — 用中文思考和说话", lang: "zh" },
+	{ label: "English — think and speak in English", lang: "en" },
+];
+
+/** The user-visible notice after a switch, in the language just chosen. */
+function switchedNote(lang: Lang): string {
+	return lang === "zh" ? "伴侣改用中文思考和说话。" : "Your companion now thinks and speaks in English.";
+}
 
 export interface MateExtensionOptions {
 	/** State directory override (defaults to getAgentDir()/mate). */
@@ -91,14 +93,30 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 
 		// ---------------------------------------------------------------------
 		// Boot: catch up across the powered-off gap + log this open, then beat while idle.
+		// First run: ask which language this companion should think in, if the terminal can ask.
 		// ---------------------------------------------------------------------
-		pi.on("session_start", (_event, ctx) => {
+		pi.on("session_start", async (_event, ctx) => {
 			liveCtx = ctx;
 			injectedFullThisRun = false;
 			try {
 				rt.wake();
 			} catch {
 				// wake() is already defensive; never let a boot issue surface.
+			}
+			// Only when NOTHING was ever chosen — not on every English boot. Headless modes (json/print)
+			// have no dialog; they keep the English default and the user can set /language later.
+			if (!rt.languageChosen && ctx.hasUI) {
+				try {
+					const choice = await ctx.ui.select(
+						"伴侣用什么语言思考？ / What language should your companion think in?",
+						[...LANG_CHOICES.map((c) => c.label)],
+					);
+					const picked = LANG_CHOICES.find((c) => c.label === choice);
+					// Escaping the dialog is a decision too: default to English so the picker never repeats.
+					rt.setLanguage(picked?.lang ?? "en");
+				} catch {
+					// A failed dialog must not block boot.
+				}
 			}
 			rt.startHeartbeat((decision, thought) => onImpulse(decision, thought));
 		});
@@ -109,9 +127,15 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 		pi.on("before_agent_start", (event) => {
 			try {
 				const core = rt.stableContext();
+				// companionSection() is guidance + the thinking-language declaration, in the chosen
+				// language. English keeps the previous guidance wording verbatim; the new one-paragraph
+				// declaration at its end is the only delta, so the first boot after upgrade takes one
+				// cache miss, then holds. A language switch rewrites this whole section: one miss, then
+				// holds again (P5).
+				const guidance = companionSection(rt.language);
 				event.systemPromptOptions.sections = {
 					...event.systemPromptOptions.sections,
-					companion: core ? `${COMPANION_GUIDANCE}\n\n${core}` : COMPANION_GUIDANCE,
+					companion: core ? `${guidance}\n\n${core}` : guidance,
 				};
 			} catch {
 				// If sections are frozen for some reason, skip guidance; the state block still rides.
@@ -222,10 +246,36 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 			handler: async (_args, ctx) => {
 				try {
 					const snap = rt.publicSnapshot();
-					ctx.ui.notify(formatSnapshot(snap), "info");
+					ctx.ui.notify(formatSnapshot(snap, rt.language), "info");
 				} catch {
 					ctx.ui.notify("companion state unavailable", "warning");
 				}
+			},
+		});
+
+		// ---------------------------------------------------------------------
+		// /language: what language this companion thinks in. Persisted in the state dir, so it
+		// survives power-off. No built-in /language exists, so there is no command collision; if a
+		// third-party extension registers one too, pi renames ours (language:N), never the reverse.
+		// ---------------------------------------------------------------------
+		pi.registerCommand("language", {
+			description: "Pick the language your companion thinks and speaks in (中文 / English)",
+			handler: async (args, ctx) => {
+				let next = parseLangArg(args ?? "");
+				if (!next && ctx.hasUI) {
+					const choice = await ctx.ui.select(
+						"语言 / Language",
+						LANG_CHOICES.map((c) => c.label),
+					);
+					next = LANG_CHOICES.find((c) => c.label === choice)?.lang;
+				}
+				if (!next) {
+					// Headless with no argument: just report the current setting.
+					ctx.ui.notify(`language: ${LANG_NAMES[rt.language]}  (/language zh | en)`, "info");
+					return;
+				}
+				rt.setLanguage(next);
+				ctx.ui.notify(switchedNote(next), "info");
 			},
 		});
 
@@ -245,18 +295,16 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 				// Do not talk over a running turn; the next beat will try again.
 				if (liveCtx && !liveCtx.isIdle()) return;
 
+				// The impulse is the companion's own inner voice, so it arrives in ITS language.
+				const L = linesFor(rt.language);
 				const advisory = "advisory" in decision && decision.advisory.length ? decision.advisory : [];
 				const content = [
-					`An impulse surfaced while the user was away: ${thought.text}`,
+					L.impulseSurfaced(thought.text),
 					"",
-					...advisory.map((a) => `(a part of you notes: ${a})`),
+					...advisory.map((a) => L.impulseAdvisory(a)),
 					"",
-					advisory.length
-						? "Weigh that, then decide for yourself whether this is worth voicing right now."
-						: "Decide for yourself whether this is worth voicing right now.",
-					"If it is, say something short and natural to them - and if you have a way to reach them",
-					"you set up earlier, you may use it. If it is not worth interrupting for, let it pass; you",
-					"can keep it private with the `feel` tool instead.",
+					advisory.length ? L.impulseWeigh : L.impulseDecide,
+					L.impulseBody,
 				].join("\n");
 
 				rt.recordProactive();
@@ -270,8 +318,9 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 	};
 }
 
-/** Render the public snapshot as a short, human line for /mate. */
-function formatSnapshot(snap: Record<string, unknown>): string {
+/** Render the public snapshot as a short, human line for /mate, in the companion's language. */
+function formatSnapshot(snap: Record<string, unknown>, lang: Lang = "en"): string {
+	const L = linesFor(lang);
 	const mood = snap.mood as { p?: number; a?: number; d?: number } | undefined;
 	const rel = snap.relationship as { trust?: number; attachment?: number } | undefined;
 	const drives = snap.drives as Record<string, number> | undefined;
@@ -280,15 +329,15 @@ function formatSnapshot(snap: Record<string, unknown>): string {
 				.filter(([, v]) => typeof v === "number" && v >= 0.3)
 				.sort((a, b) => b[1] - a[1])
 				.slice(0, 3)
-				.map(([k, v]) => `${k} ${(v as number).toFixed(2)}`)
-				.join(", ")
+				.map(([k, v]) => `${driveGloss(k, lang)} ${(v as number).toFixed(2)}`)
+				.join(lang === "zh" ? " " : ", ")
 		: "";
 	const bits = [
-		mood ? `mood pad ${mood.p?.toFixed(2)},${mood.a?.toFixed(2)},${mood.d?.toFixed(2)}` : "",
-		rel ? `trust ${rel.trust?.toFixed(2)} close ${rel.attachment?.toFixed(2)}` : "",
-		top ? `drives ${top}` : "",
+		mood ? L.snapMood(`${mood.p?.toFixed(2)},${mood.a?.toFixed(2)},${mood.d?.toFixed(2)}`) : "",
+		rel ? `${L.snapTrust(rel.trust?.toFixed(2) ?? "")} ${L.snapClose(rel.attachment?.toFixed(2) ?? "")}` : "",
+		top ? `${L.snapDrives} ${top}` : "",
 	].filter(Boolean);
-	return bits.length ? bits.join(" | ") : "quiet, steady.";
+	return bits.length ? bits.join(" | ") : L.snapQuiet;
 }
 
 export default createMateExtension();

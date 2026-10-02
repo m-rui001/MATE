@@ -26,6 +26,7 @@
  *     regardless of how the gap is subdivided. `verifySubdivisionInvariance()` tests exactly this.
  */
 
+import { fmtDurSpaced, type Lang } from "./i18n.ts";
 import { sleepTransition, transition } from "./kernel.ts";
 import { HEARTBEAT_MS, MOOD, SLEEP_WINDOW } from "./params.ts";
 import type { MateEvent, MateState } from "./types.ts";
@@ -104,18 +105,13 @@ export function crossedSleepWindows(from: number, to: number, clock: Clock): Cro
 	return out;
 }
 
-/** Label a gap the way a person would describe it. */
-export function gapLabel(ms: number): string {
-	const m = Math.round(ms / 60_000);
-	if (m < 1) return "just now";
-	if (m < 60) return `${m}m`;
-	const h = Math.floor(m / 60);
-	if (h < 24) return `${h}h${m % 60 ? ` ${m % 60}m` : ""}`;
-	const d = Math.floor(h / 24);
-	if (d < 7) return `${d}d ${h % 24}h`;
-	if (d < 60) return `${Math.floor(d / 7)}w`;
-	if (d < 365) return `${Math.floor(d / 30)}mo`;
-	return `${(d / 365).toFixed(1)}y`;
+/**
+ * Label a gap the way a person would describe it. `lang` only changes the units; the rounding and
+ * the breakpoints are shared, so an English and a Chinese companion are "offline for" the same amount
+ * of time.
+ */
+export function gapLabel(ms: number, lang: Lang = "en"): string {
+	return fmtDurSpaced(ms, lang);
 }
 
 /**

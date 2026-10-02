@@ -23,6 +23,7 @@ export * from "./birth.ts";
 export * from "./catchup.ts";
 export * from "./context.ts";
 export * from "./daemon.ts";
+export * from "./i18n.ts";
 export * from "./kernel.ts";
 export * from "./memory.ts";
 export * from "./params.ts";
