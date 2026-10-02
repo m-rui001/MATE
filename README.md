@@ -60,9 +60,16 @@ surface in Chinese — identity block, state projection, the kernel's own though
 rather than translating on the way out. A Chinese companion remembers, feels, and decides exactly
 what an English one does; only the labels move.
 
-## Build and run
+## Get MATE
 
-Requires Node >= 22.19. There is no published package yet; build from source. Each line is a
+Two ways in. **Prebuilt binaries (no Node needed):** download the archive for your platform from
+[the v1.0.0-mate release](https://github.com/m-rui001/MATE/releases/tag/v1.0.0-mate) —
+`mate-windows-x64.zip` / `mate-windows-arm64.zip` (run `mate.exe`), `mate-linux-x64.tar.gz` /
+`mate-linux-arm64.tar.gz` and `mate-darwin-x64.tar.gz` / `mate-darwin-arm64.tar.gz` (run `mate/mate`
+after `tar -xzf`). On macOS, if Gatekeeper blocks it: `xattr -d com.apple.quarantine mate`.
+Config lives in `~/.mate`; first run asks which language the companion thinks and speaks in.
+
+**Build from source:** Requires Node >= 22.19. Each line is a
 separate command (do not copy the comment onto the line; cmd.exe does not treat `#` as a comment).
 
 ```bash
@@ -150,9 +157,11 @@ MATE 保留了 pi 的能力（bash、MCP、自安装扩展、整个代理核心�
 
 伴侣用你选的语言思考。第一次启动时它会问你要 中文 还是 English，之后随时可以用 `/language` 改；这个选择会持久保存。选了中文之后，所有进入提示词的内容都用中文书写 — 身份块、状态投影、内核自己的想法、冲动、引导 — 外加一条明确的声明：内在的声音本身就是中文的。所以它是直接用中文想，而不是想完再翻。中文伴侣记得的、感受到的、做出的决定，和英文伴侣完全一样；移动的只有标签。
 
-## 构建和运行
+## 获取 MATE
 
-需要 Node >= 22.19。目前没有发布的安装包，请从源码构建。每一行都是一条独立命令（不要把注释复制进命令行，cmd.exe 不把 `#` 当注释）。
+两种途径。**免编译安装包（无需 Node）：** 到 [v1.0.0-mate release](https://github.com/m-rui001/MATE/releases/tag/v1.0.0-mate) 下载对应平台的压缩包——Windows 下 `mate-windows-x64.zip` / `mate-windows-arm64.zip`（解压后运行 `mate.exe`），Linux / macOS 下 `mate-linux-x64.tar.gz`、`mate-darwin-arm64.tar.gz` 等（`tar -xzf` 解压后运行 `mate/mate`）。macOS 若被 Gatekeeper 拦截：`xattr -d com.apple.quarantine mate`。配置在 `~/.mate`；首次启动会询问伴侣用什么语言思考和说话。
+
+**从源码构建：** 需要 Node >= 22.19。每一行都是一条独立命令（不要把注释复制进命令行，cmd.exe 不把 `#` 当注释）。
 
 ```bash
 npm install --ignore-scripts
