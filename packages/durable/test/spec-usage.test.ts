@@ -1,5 +1,5 @@
 /**
- * The usage examples of docs/pico-v5.md, compile-checked. Each block is copied as written apart from formatting, with
+ * The usage examples of docs/spec.md, compile-checked. Each block is copied as written apart from formatting, with
  * the names the spec leaves to the application declared below. Keep the two in sync; `test/examples/` runs the same
  * patterns end to end.
  */

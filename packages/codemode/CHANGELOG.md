@@ -1,6 +1,14 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0] - 2026-10-01
+
+### Added
+
+- Added `renderToolOutputType()`, the type a tool call resolves to.
+
+### Changed
+
+- Reading a member of `tools` or of a global namespace that does not exist now throws an error naming the close matches, instead of returning `undefined`. Use `"name" in tools` to check for a tool. `store()` size errors explain what the store is for.
 
 ## [0.99.2] - 2026-09-30
 

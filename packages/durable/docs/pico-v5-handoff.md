@@ -1,6 +1,6 @@
 # Pico5 implementation handoff
 
-`packages/durable/docs/pico-v5.md` is normative. Implement this list in order.
+`packages/durable/docs/spec.md` is normative. Implement this list in order.
 After every package: run its tests, run `npm run check`, and stop for user review.
 Do not redesign later packages while implementing the current one.
 
@@ -824,7 +824,7 @@ updates):
 
 ## 21. Extensions and per-conversation agents
 
-Implement the design agreed with Mario, now specified in `pico-v5.md` (§2.2,
+Implement the design agreed with Mario, now specified in `spec.md` (§2.2,
 §5.1/§5.4 runtime surface, §6 queue modes, §7.1–§7.5, §8 where tasks read the
 agent and settings, §9.3/§9.4 view mount and events, §12 footguns): extensions
 installed by name replace keys, positions, `batch()`, wrappers-by-key, hook
@@ -909,7 +909,7 @@ background flag, and owned conversations, published after each commit as a
 replicated state or watch. `inspect()` already provides a one-off snapshot of
 the live task records. Specify and build it after the final conformance package.
 
-Specified in `pico-v5.md` §9.5: `Harness.taskGraph()` and `watchTaskGraph()` mount
+Specified in `spec.md` §9.5: `Harness.taskGraph()` and `watchTaskGraph()` mount
 every live task keyed by ID with its committed status (phase, wait, held outcome
 status), owner edge, flags, and owned conversations. Derived states (`blocked`,
 `ready`, the live part of `on`) stay in `inspect()`. Implemented in

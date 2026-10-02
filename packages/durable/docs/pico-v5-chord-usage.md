@@ -1,6 +1,6 @@
 # Pico5 documents through Chord
 
-This guide uses the contracts in the [Pico5 specification](pico-v5.md). Its code
+This guide uses the contracts in the [Pico5 specification](spec.md). Its code
 compiles and runs as `test/chord-guide.test.ts`; keep the two in sync.
 
 - **Session:** a durable container for conversations, entries, tasks, and documents;
@@ -343,7 +343,7 @@ document ["s", ["generation", "message"], value]
  -> view ["s", ["docs", "pi.live", "generation", "message"], value]
 ```
 
-`pi.live` is specified in `pico-v5.md` section 8.2.
+`pi.live` is specified in `spec.md` section 8.2.
 The mount publishes one batch per complete Session commit: entry/head changes and
 changed mounted documents together, without a tracker or semantic projection.
 Third-party documents are **not automatically mounted**; use their own Chord

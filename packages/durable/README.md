@@ -586,9 +586,9 @@ Examples that call OpenAI need `OPENAI_API_KEY`; most use the faux provider othe
 
 ## Design Documents
 
-- [`docs/pico-v5.md`](docs/pico-v5.md): the normative specification
-- [`docs/pico-v5-handoff.md`](docs/pico-v5-handoff.md): the implementation plan
-- [`docs/pico-v5-chord-usage.md`](docs/pico-v5-chord-usage.md): how the package uses Chord
+- [`docs/spec.md`](https://github.com/earendil-works/pi/blob/main/packages/durable/docs/spec.md): the normative specification
+- [`docs/pico-v5-handoff.md`](https://github.com/earendil-works/pi/blob/main/packages/durable/docs/pico-v5-handoff.md): the implementation plan
+- [`docs/pico-v5-chord-usage.md`](https://github.com/earendil-works/pi/blob/main/packages/durable/docs/pico-v5-chord-usage.md): how the package uses Chord
 
 Benchmarks: `npm run bench:storage`, `npm run bench:storage:memory`, and `npm run bench:tool-output`.
 
