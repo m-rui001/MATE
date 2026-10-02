@@ -192,10 +192,12 @@ sees its real state each turn without re-paying for stable content every time.
 
 ```bash
 npm install                       # workspace deps (links @earendil-works/pi-mate)
-npm run build:offline             # or: cd packages/mate && npm run build, then the coding-agent build
-cd packages/coding-agent
-node dist/bundle/cli.js           # the companion; bin is `pi`/`mate`
+npm run build:offline             # full chain, mate before coding-agent
+npm link -w @earendil-works/pi-coding-agent   # optional: global `mate` on PATH
+mate                              # opens the companion; `mate install <src>` = `pi install`
 ```
+
+Without `npm link`, run the bundle directly: `cd packages/coding-agent && node dist/bundle/cli.js`.
 
 - `/mate` — public mood/drives snapshot (never shows sealed data).
 - `/language` — pick the companion's thinking/speaking language (中文 / English); first launch prompts, and the choice persists in `lang.json`.

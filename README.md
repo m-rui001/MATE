@@ -62,16 +62,35 @@ what an English one does; only the labels move.
 
 ## Build and run
 
-Requires Node >= 22.19. There is no published package yet; run from source:
+Requires Node >= 22.19. There is no published package yet; build from source. Each line is a
+separate command (do not copy the comment onto the line; cmd.exe does not treat `#` as a comment).
 
 ```bash
 npm install --ignore-scripts
-npm run build           # or: npm run build:offline (no network, reuses cached model data)
+npm run build
+```
+
+Use `npm run build:offline` instead of `npm run build` when you have no network; it reuses cached
+model data. Then make `mate` a global command, exactly the way `pi` works:
+
+```bash
+npm link -w @earendil-works/pi-coding-agent
+```
+
+That links the built bundle onto your PATH, so after this you just type `mate` anywhere to open the
+companion. Other common forms: `mate install <source>` installs an extension through the same
+pipeline as `pi install`, and `mate -p "hello"` is one-shot print mode.
+
+Without the `npm link` step you can still run it directly from the build:
+
+```bash
 cd packages/coding-agent
-node dist/bundle/cli.js # this is `mate`
+node dist/bundle/cli.js
 ```
 
 `mate` persists state under `~/.mate/agent/mate/`, which you can move with `MATE_CODING_AGENT_DIR`.
+The same commands work in Windows cmd.exe (`cd packages\coding-agent`, then
+`node dist\bundle\cli.js`); a global `npm link` there creates `mate.cmd` in your npm prefix.
 
 ## What is not here
 
@@ -133,16 +152,29 @@ MATE 保留了 pi 的能力（bash、MCP、自安装扩展、整个代理核心�
 
 ## 构建和运行
 
-需要 Node >= 22.19。目前没有发布的安装包，从源码运行：
+需要 Node >= 22.19。目前没有发布的安装包，请从源码构建。每一行都是一条独立命令（不要把注释复制进命令行，cmd.exe 不把 `#` 当注释）。
 
 ```bash
 npm install --ignore-scripts
-npm run build           # 或：npm run build:offline（无网络，复用缓存的模型数据）
-cd packages/coding-agent
-node dist/bundle/cli.js # 这就是 `mate`
+npm run build
 ```
 
-`mate` 把状态持久化在 `~/.mate/agent/mate/` 下，你可以用 `MATE_CODING_AGENT_DIR` 移动它。
+没有网络时，用 `npm run build:offline` 代替 `npm run build`，它复用缓存的模型数据。然后让 `mate` 成为全局命令，和 `pi` 的用法完全一致：
+
+```bash
+npm link -w @earendil-works/pi-coding-agent
+```
+
+这一步把构建好的 bundle 链接到你的 PATH，之后在任何目录直接输入 `mate` 就能打开伴侣。其他常用形式：`mate install <source>` 安装扩展（和 `pi install` 同一条管线），`mate -p "hello"` 是单次 print 模式。
+
+不做 `npm link` 也可以直接从构建产物运行：
+
+```bash
+cd packages/coding-agent
+node dist/bundle/cli.js
+```
+
+`mate` 把状态持久化在 `~/.mate/agent/mate/` 下，你可以用 `MATE_CODING_AGENT_DIR` 移动它。同样的命令在 Windows cmd.exe 里也能用（`cd packages\coding-agent`，然后 `node dist\bundle\cli.js`）；`npm link` 在你的 npm 前缀目录下会生成 `mate.cmd`。
 
 ## 这里没有什么
 
