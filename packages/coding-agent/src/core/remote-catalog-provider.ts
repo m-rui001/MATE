@@ -46,7 +46,7 @@ function parseCatalog(providerId: string, value: unknown): AnyModel[] {
 	return entries
 		.filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null && "id" in entry)
 		.filter(isSupportedModelType)
-		.map((model) => ({ ...model, provider: providerId }) as AnyModel);
+		.map(({ input, ...rest }) => ({ ...rest, input: Array.isArray(input) ? input : ["text"], provider: providerId }) as AnyModel);
 }
 
 function remoteModels(entry: ModelsStoreEntry | undefined, localGeneratedAt: number | undefined): readonly AnyModel[] {
@@ -54,7 +54,10 @@ function remoteModels(entry: ModelsStoreEntry | undefined, localGeneratedAt: num
 	if (localGeneratedAt !== undefined && (entry.lastModified === undefined || entry.lastModified <= localGeneratedAt)) {
 		return [];
 	}
-	return entry.models;
+	// Cached bodies may predate fields newer code assumes (e.g. `input`); default before use.
+	return entry.models.map((model) =>
+		Array.isArray(model.input) ? model : ({ ...model, input: ["text"] } as AnyModel),
+	);
 }
 
 /** Add a persisted pi.dev catalog overlay to a static built-in provider. */

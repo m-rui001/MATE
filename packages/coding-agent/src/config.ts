@@ -577,6 +577,15 @@ export function getAgentDir(): string {
 	return join(homedir(), CONFIG_DIR_NAME, "agent");
 }
 
+// Distribution bridge for third-party extensions. Extensions written for upstream pi often read the
+// literal variable PI_CODING_AGENT_DIR to locate config instead of the app-derived name
+// (MATE_CODING_AGENT_DIR). For a rebrand, mirror the resolved agent dir under the upstream name so
+// well-behaved extensions find mate's directory. Extensions that hardcode ~/.pi paths cannot be
+// bridged from here; those need their own config.
+if (!IS_OFFICIAL_DISTRIBUTION && process.env.PI_CODING_AGENT_DIR === undefined) {
+	process.env.PI_CODING_AGENT_DIR = getAgentDir();
+}
+
 /** Get path to user's custom themes directory */
 export function getCustomThemesDir(): string {
 	return join(getAgentDir(), "themes");
