@@ -16,10 +16,26 @@
  *   - encode:    fold an episodic trace (tokens + PAD + intent + text) into the graph.
  *   - recall:    spread activation from seeds (tokens and/or a PAD vector) and return the top-N
  *                nodes with their co-activation scores and hop-distance.
- *   - consolidate: called from the sleep path (kernel.sleepTransition) — decay strengths, prune
- *                below a floor, merge redundant nodes by key.
+ *   - rehearse:  the testing-effect companion to recall — reinforces whatever surfaced, so memories
+ *                you keep pulling up get stickier even when nobody says them again.
+ *   - consolidate: called from the sleep path and on boot after catch-up. Commits elapsed-time decay
+ *                into stored strengths, prunes below a floor, caps at maxNodes. This is *selective*
+ *                downscaling (Tononi's synaptic homeostasis): the weak fade, the reinforced survive.
  *   - summary:   a stable, terse rendering of the graph's top nodes and edges for the CACHED
  *                system-prompt prefix (P5). Bounded; changes slowly.
+ *
+ * Forgetting model (grounded in the literature; the previous version was event-count based, which
+ * was wrong in two ways):
+ *   - **Time, not a nightly fixed cut.** ACT-R treats recency as a *consequence* of the power law of
+ *     forgetting — activation simply decays with age. We follow that with a closed-form exponential
+ *     (matching the kernel's exact-integration style): retrieval scores use `effectiveStrength`,
+ *     which decays from `stored · exp(-(now-t)/τ)`. No separate "recency" addend is needed, because
+ *     time is baked into the activation itself. Generative-Agents' recency term is exactly this.
+ *   - **Retrieval is reinforcement.** In ACT-R a successful retrieval raises a chunk's base-level
+ *     activation (the testing effect); a memory you keep recalling gets stickier even if nobody says
+ *     it again. `recall()` is pure, so `rehearse()` is the companion side-effect the runtime applies
+ *     to whatever surfaced. Untouched, unrehearsed memories fade; recalled-often ones persist — that
+ *     is the "memory vs forgetting" balance working as it should.
  *
  * Determinism rules:
  *   - no Date.now() inside; every function takes explicit timestamps.
@@ -87,6 +103,29 @@ export interface MemoryGraph {
 const MIN_TOKEN_LEN = 3;
 const MAX_EPISODE_KEYS = 12;
 const EPISODE_RING = 48;
+
+/**
+ * Strength time-constant, ms. How long a memory holds before it has decayed to 1/e of its stored
+ * strength, absent reinforcement. Deliberately on the order of DAYS, not hours: retrieval can
+ * de-weight a stale node quickly (salience handles the fast "just now" layer), but true forgetting —
+ * a node falling below the prune floor in `consolidate` — should take a companion's realistic
+ * timescale. A neutral one-off mention (strength ~0.35) fades to the 0.08 floor in roughly three
+ * weeks if never recalled again; emotional charge slows that by up to 4× (see `protectedTau`), and
+ * the testing effect (`rehearse`) stalls the clock entirely — so a fact you keep bringing up or that
+ * carried feeling becomes durable. This matches the Ebbinghaus/ACT-R picture: unrehearsed traces decay
+ * over days, retrieved and charged ones persist.
+ */
+const STRENGTH_TAU_MS = 5 * 86_400_000;
+
+/** Max extra persistence a highly-charged memory earns, as a multiplier on tau. */
+const IMPORTANCE_BOOST = 3;
+
+/** Short-term trace time-constant, ms. Salience is the fast-decaying "just now" layer; it fades in a
+ * few hours so it can nudge retrieval without permanently inflating a node. */
+const SALIENCE_TAU_MS = 6 * 3_600_000;
+
+/** The lift one successful recall adds to stored strength (the testing effect). */
+const REHEARSE_BOOST = 0.06;
 
 /** A tiny stop-list: English high-frequency function words. Deliberately small — the point is not
  * "NLP-grade parsing", it is to avoid nodes for "the"/"and"/"you". Anything content-bearing passes. */
@@ -294,6 +333,11 @@ export function attachSealed(g: MemoryGraph, key: string, sealedId: string): Mem
 /**
  * Spreading activation from seed keys. Hop 1 = direct neighbours, hop 2 = neighbours of neighbours,
  * weighted lower. Deterministic; ties broken by (score desc, key asc).
+ *
+ * Scoring is the ACT-R base-level + spreading-activation picture in one line: a node's contribution
+ * is its `activation`, which is time-decayed strength (so forgetting is continuous, not a nightly
+ * cut) plus a slice of its still-hot short-term salience. Edges scale that by their association
+ * weight. There is deliberately NO separate recency term — time already lives inside the decay.
  */
 export interface RecallOptions {
 	/** Seeds: node keys derived from tokens, or explicit keys. */
@@ -303,8 +347,6 @@ export interface RecallOptions {
 	depth?: number;
 	/** Number of top results. Default 6. */
 	limit?: number;
-	/** Half-life for recency weighting. Default 48h. */
-	recencyTauMs?: number;
 }
 
 export interface RecallHit {
@@ -318,18 +360,22 @@ export interface RecallHit {
 	sealed?: string;
 }
 
+/** How retrievable a node is right now: time-decayed strength plus a slice of its short-term trace. */
+function activation(n: MemoryNode, now: number): number {
+	return effectiveStrength(n, now) * 0.6 + n.salience * 0.4;
+}
+
 export function recall(g: MemoryGraph, opts: RecallOptions): RecallHit[] {
 	const depth = opts.depth ?? 2;
 	const limit = opts.limit ?? 6;
-	const tau = opts.recencyTauMs ?? 48 * 3_600_000;
+	const now = opts.now;
 	const scores = new Map<string, { score: number; hop: number }>();
 
 	const seedSet = new Set(opts.seeds);
 	for (const s of seedSet) {
 		const n = g.nodes[s];
 		if (!n) continue;
-		const rec = recencyWeight(n.t, opts.now, tau);
-		scores.set(s, { score: n.strength * 0.5 + n.salience * 0.5 + rec * 0.3, hop: 0 });
+		scores.set(s, { score: activation(n, now), hop: 0 });
 	}
 
 	// Hop 1.
@@ -343,16 +389,13 @@ export function recall(g: MemoryGraph, opts: RecallOptions): RecallHit[] {
 		if (!edge) continue;
 		const n = g.nodes[dst];
 		if (!n) continue;
-		const contribution = Math.abs(edge.weight) * (n.strength * 0.5 + n.salience * 0.5);
+		const contribution = Math.abs(edge.weight) * activation(n, now);
 		hop1.set(dst, (hop1.get(dst) ?? 0) + contribution);
 	}
 	for (const [k, v] of hop1) {
 		if (v <= 0) continue;
-		const n = g.nodes[k];
-		const rec = recencyWeight(n.t, opts.now, tau);
-		const s = v * 0.7 + rec * 0.15;
 		const prev = scores.get(k);
-		if (!prev || s > prev.score) scores.set(k, { score: s, hop: 1 });
+		if (!prev || v > prev.score) scores.set(k, { score: v, hop: 1 });
 	}
 
 	// Hop 2 (from hop-1 hits only, if depth >= 2).
@@ -369,7 +412,7 @@ export function recall(g: MemoryGraph, opts: RecallOptions): RecallHit[] {
 			const srcScore = hop1.get(src) ?? 0;
 			const n = g.nodes[dst];
 			if (!n) continue;
-			const contribution = srcScore * Math.abs(edge.weight) * 0.5 * (n.strength * 0.5 + n.salience * 0.5);
+			const contribution = srcScore * Math.abs(edge.weight) * 0.5 * activation(n, now);
 			hop2.set(dst, (hop2.get(dst) ?? 0) + contribution);
 		}
 		for (const [k, v] of hop2) {
@@ -399,20 +442,50 @@ export function recall(g: MemoryGraph, opts: RecallOptions): RecallHit[] {
 }
 
 /**
- * Consolidate. Called from the sleep path (once per sleep window) and on boot after catch-up.
- *  - Nodes: strength *= 0.98, salience *= 0.7 (short-term decays faster), age them toward zero.
- *  - Edges: weight *= 0.97, drop below a magnitude floor.
- *  - Prune: nodes below a strength floor or over maxNodes (weakest first).
+ * The testing effect (ACT-R: a successful retrieval raises base-level activation; the
+ * generation/testing effect in the memory literature). `recall` is pure, so this is the companion
+ * side-effect the host applies to whatever surfaced: recalled nodes get a little stickier and their
+ * decay clock restarts. A fact you keep pulling up persists; one you never retrieve fades — which is
+ * exactly the balance the user asked about ("遗忘和记忆的关系"). Not a blanket bonus: bounded, so a
+ * trivia node recalled a hundred times still can't outrank a core memory that is also rehearsed.
  */
-export function consolidate(g: MemoryGraph): MemoryGraph {
+export function rehearse(g: MemoryGraph, keys: string[], now: number): MemoryGraph {
+	if (keys.length === 0) return g;
+	const nodes = { ...g.nodes };
+	let changed = false;
+	for (const k of keys) {
+		const n = nodes[k];
+		if (!n) continue;
+		nodes[k] = {
+			...n,
+			strength: Math.min(1, n.strength + REHEARSE_BOOST),
+			salience: Math.min(1, n.salience + 0.2),
+			t: now,
+		};
+		changed = true;
+	}
+	return changed ? { ...g, nodes } : g;
+}
+
+/**
+ * Consolidate — commit what time has already done, then let the weak fall. Called from the sleep path
+ * and once per wake after catch-up. This mirrors synaptic downscaling (Tononi): across the gap that
+ * just passed, every memory decayed toward zero according to its OWN protected time constant (charged
+ * memories fade slower); we bank that decay into stored strength, prune what has fallen below the
+ * floor, and cap the graph. `now` is required so the decay is measured over real elapsed time, not a
+ * fixed nightly percentage — a memory off for a week must lose more than one off for a night.
+ */
+export function consolidate(g: MemoryGraph, now: number): MemoryGraph {
 	const nodes: Record<string, MemoryNode> = {};
 	for (const [k, n] of Object.entries(g.nodes)) {
-		const strength = n.strength * 0.98;
-		const salience = n.salience * 0.7;
-		if (strength < 0.08) continue; // below floor: drop entirely
-		nodes[k] = { ...n, strength, salience };
+		// Bank the elapsed decay: effective strength at `now` becomes the new stored strength, and the
+		// clock resets so we do not decay the same interval twice. Salience, the fast layer, just fades.
+		const strength = effectiveStrength(n, now);
+		const salience = n.salience * recencyWeight(n.t, now, SALIENCE_TAU_MS);
+		if (strength < 0.08) continue; // below floor: dropped — this is the forgetting that matters
+		nodes[k] = { ...n, strength, salience, t: now };
 	}
-	// Cap by maxNodes, weakest first.
+	// Cap by maxNodes, weakest-first (now time-aware, since we just banked decay into strength).
 	const keys = Object.keys(nodes);
 	if (keys.length > g.maxNodes) {
 		const drop = keys
@@ -423,7 +496,11 @@ export function consolidate(g: MemoryGraph): MemoryGraph {
 	const edges: MemoryEdge[] = [];
 	for (const e of g.edges) {
 		if (!nodes[e.a] || !nodes[e.b]) continue;
-		const weight = e.weight * 0.97;
+		// Edges track their endpoints' freshness: a tie between two fading nodes fades faster. The
+		// multiplier is the geometric mean of the two endpoint strengths, so an edge never outlives the
+		// weaker of the memories it links. (0.5 + 0.5·freshness stays in [0.5,1], so it can't exceed 1.)
+		const freshness = Math.sqrt(nodes[e.a].strength * nodes[e.b].strength);
+		const weight = e.weight * (0.5 + 0.5 * freshness);
 		if (Math.abs(weight) < 0.05) continue;
 		edges.push({ ...e, weight });
 	}
@@ -473,15 +550,14 @@ export function summary(g: MemoryGraph, opts: { nodes?: number; edges?: number; 
 	return body.length <= max ? body : `${body.slice(0, max - 14)}\n…\n</mate-memory>`;
 }
 
-/** The top-k node keys for a mood-driven "what has been on my mind" seed, ignoring text input. */
+/** The top-k node keys for a mood-driven "what has been on my mind" seed, ignoring text input. Uses
+ * the same moment-to-moment `activation` recall scores with, so the daemon's free-floating thoughts
+ * are grounded in the things that are most retrievable RIGHT NOW (reinforced + recent + charged),
+ * not in raw stored strength. (The previous comparator had a bug — it paired one node's recency with
+ * the other's strength and so ignored strength entirely.) */
 export function topNodes(g: MemoryGraph, now: number, k = 3): string[] {
 	return Object.values(g.nodes)
-		.sort(
-			(a, b) =>
-				b.strength * 0.6 +
-					recencyWeight(a.t, now, 72 * 3_600_000) * 0.4 -
-					(b.strength * 0.6 + recencyWeight(b.t, now, 72 * 3_600_000) * 0.4) || (a.key < b.key ? -1 : 1),
-		)
+		.sort((a, b) => activation(b, now) - activation(a, now) || (a.key < b.key ? -1 : 1))
 		.slice(0, k)
 		.map((n) => n.key);
 }
@@ -493,6 +569,27 @@ export function topNodes(g: MemoryGraph, now: number, k = 3): string[] {
 function recencyWeight(t: number, now: number, tau: number): number {
 	const dt = Math.max(0, now - t);
 	return Math.exp(-dt / tau);
+}
+
+/**
+ * How slowly a node's STRENGTH decays with time. Emotional salience lengthens the time constant: a
+ * memory tied to strong feeling (any PAD axis far from neutral) persists further than a grey one-off
+ * token. This is the "importance" term of Generative-Agents retrieval, expressed biologically as a
+ * slower forgetting rate rather than as a separate retrieval bonus — the same direction ACT-R and the
+ * synaptic-homeostasis literature point to (what mattered is what survives downscaling).
+ */
+function protectedTau(n: MemoryNode): number {
+	const charge = Math.max(Math.abs(n.pad.p), Math.abs(n.pad.a), Math.abs(n.pad.d));
+	return STRENGTH_TAU_MS * (1 + IMPORTANCE_BOOST * charge);
+}
+
+/**
+ * The strength a node effectively carries RIGHT NOW: stored strength decayed by elapsed time, with a
+ * charge-scaled time constant. Every retrieval score reads this instead of raw `strength`, so time is
+ * doing the forgetting continuously — there is no separate recency addend to double-count it.
+ */
+export function effectiveStrength(n: MemoryNode, now: number): number {
+	return n.strength * recencyWeight(n.t, now, protectedTau(n));
 }
 
 function clampW(x: number): number {

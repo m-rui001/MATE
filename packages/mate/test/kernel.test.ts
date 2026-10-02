@@ -6,10 +6,10 @@
 
 import { describe, expect, it } from "vitest";
 import { birth } from "../src/birth.ts";
+import { catchUp, systemClock, verifySubdivisionInvariance } from "../src/catchup.ts";
+import { emptyEmotions, netEmotions, padCentre, padCentreFromRho, transition } from "../src/kernel.ts";
+import { applyKick, buildHamiltonian, fromEmotions, totalCoherence, trace, unitaryFromH } from "../src/quantum.ts";
 import { EMOTIONS } from "../src/types.ts";
-import { transition, padCentre, padCentreFromRho, netEmotions, emptyEmotions } from "../src/kernel.ts";
-import { trace, totalCoherence, buildHamiltonian, unitaryFromH, applyKick, fromEmotions } from "../src/quantum.ts";
-import { catchUp, verifySubdivisionInvariance, systemClock } from "../src/catchup.ts";
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -17,7 +17,8 @@ const HOUR = 3_600_000;
 /** Fire a random-ish but deterministic event at time t. */
 function event(t: number, seed: number) {
 	const act = {} as Record<string, number>;
-	for (const e of EMOTIONS) act[e] = ((Math.sin(seed * 12.9898 + e.length * 78.233) * 43758.5453) % 1 + 1) % 1 * 0.6;
+	for (const e of EMOTIONS)
+		act[e] = ((((Math.sin(seed * 12.9898 + e.length * 78.233) * 43758.5453) % 1) + 1) % 1) * 0.6;
 	return { kind: "user_message" as const, activations: act, intensity: 0.5, intent: "chat" as const, t };
 }
 
@@ -75,7 +76,13 @@ describe("kernel invariants", () => {
 	it("caps trust drop per event", () => {
 		let s = birth({ seed: 9, born: 0 });
 		s = { ...s, relationship: { ...s.relationship, trust: 0.8 } };
-		const hostile = { kind: "user_message" as const, activations: { anger: 1, disgust: 1 }, intensity: 1, intent: "chat" as const, t: HOUR };
+		const hostile = {
+			kind: "user_message" as const,
+			activations: { anger: 1, disgust: 1 },
+			intensity: 1,
+			intent: "chat" as const,
+			t: HOUR,
+		};
 		const after = transition(s, hostile, HOUR - s.t).state;
 		// One event cannot wipe out trust: drop is bounded by TRUST_DROP_CAP fraction.
 		expect(after.relationship.trust).toBeGreaterThan(0.8 * (1 - 0.12) - 0.05);
@@ -96,7 +103,11 @@ describe("kernel invariants", () => {
 
 	it("produces dyads from co-active emotions", () => {
 		const s = birth({ seed: 2, born: 0 });
-		const r = transition(s, { kind: "user_message", activations: { joy: 0.8, trust: 0.8 }, intensity: 1, intent: "chat", t: 1000 }, 1000);
+		const r = transition(
+			s,
+			{ kind: "user_message", activations: { joy: 0.8, trust: 0.8 }, intensity: 1, intent: "chat", t: 1000 },
+			1000,
+		);
 		expect(r.dyads).toContain("love");
 		// netEmotions/padCentre are exercised through transition; sanity-check them directly too.
 		const emo = emptyEmotions();
@@ -165,7 +176,11 @@ describe("offline catch-up", () => {
 	it("coherence decays over long silence (state becomes classical)", () => {
 		let s = birth({ seed: 31, born: 0 });
 		// Pump some emotion in to create coherence.
-		s = transition(s, { kind: "user_message", activations: { joy: 0.8, sadness: 0.6 }, intensity: 1, intent: "chat", t: 1000 }, 1000).state;
+		s = transition(
+			s,
+			{ kind: "user_message", activations: { joy: 0.8, sadness: 0.6 }, intensity: 1, intent: "chat", t: 1000 },
+			1000,
+		).state;
 		const c0 = totalCoherence(s.rho);
 		const { state: later } = catchUp(s, systemClock(), s.t + 2 * DAY);
 		const c1 = totalCoherence(later.rho);
@@ -192,8 +207,10 @@ describe("quantum order effects", () => {
 		const first = order === "AB" ? WARM : HOSTILE;
 		const second = order === "AB" ? HOSTILE : WARM;
 		let t = s.t;
-		s = transition(s, { kind: "user_message", activations: first, intensity: 1, intent: "chat", t: (t += dt) }, dt).state;
-		s = transition(s, { kind: "user_message", activations: second, intensity: 1, intent: "chat", t: (t += dt) }, dt).state;
+		t += dt;
+		s = transition(s, { kind: "user_message", activations: first, intensity: 1, intent: "chat", t }, dt).state;
+		t += dt;
+		s = transition(s, { kind: "user_message", activations: second, intensity: 1, intent: "chat", t }, dt).state;
 		return s;
 	}
 	const net = (s: ReturnType<typeof run>) => netEmotions(s.emotions, s.opponent);
@@ -240,7 +257,10 @@ describe("quantum order effects", () => {
 
 	it("the unitary kick is trace-preserving and keeps rho positive-semidefinite", () => {
 		const H = buildHamiltonian({ joy: 0.8, trust: 0.6, anger: 0.7, fear: 0.5 }, 0.5, 0.7);
-		const rho = fromEmotions({ joy: 0.8, trust: 0.6, fear: 0.5, surprise: 0, sadness: 0, disgust: 0, anger: 0.7, anticipation: 0 }, 12345);
+		const rho = fromEmotions(
+			{ joy: 0.8, trust: 0.6, fear: 0.5, surprise: 0, sadness: 0, disgust: 0, anger: 0.7, anticipation: 0 },
+			12345,
+		);
 		const t0 = trace(rho);
 		applyKick(rho, unitaryFromH(H, Math.PI / 3));
 		const t1 = trace(rho);

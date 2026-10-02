@@ -49,6 +49,7 @@ import {
 	type RecallHit,
 	type ReplyInclination,
 	recall,
+	rehearse,
 	replyInclination,
 	save,
 	seal,
@@ -175,7 +176,7 @@ export class MateRuntime {
 			// Sleep consolidates memory too: decay/prune the graph once per wake (P4). This mirrors the
 			// kernel's sleep windows — a companion that was off for three days forgets the trivia and
 			// keeps the things that were reinforced, the way the affective state integrates the gap.
-			const memory = consolidate(this.persisted.memory);
+			const memory = consolidate(this.persisted.memory, now);
 			// Record that THIS body just opened. If the last mark never closed (crash / killed terminal),
 			// openSession seals it at `now`, so the log stays honest about the comings and goings.
 			const sessions = openSession(this.persisted.sessions, now);
@@ -284,6 +285,16 @@ export class MateRuntime {
 			const seeds = tokenise(text).map(nodeKey);
 			const rec = recall(this.persisted.memory, { seeds, now, limit: 6 });
 			this.lastRecall = rec;
+			// Testing effect: whatever this message pulled to the surface gets a little stickier, so
+			// memories the companion keeps reaching for persist and ones it never retrieves fade.
+			this.persisted = {
+				...this.persisted,
+				memory: rehearse(
+					this.persisted.memory,
+					rec.map((h) => h.key),
+					now,
+				),
+			};
 
 			// P1: an advisory lean, not a gate. Nothing here suppresses the turn; the model reads it in
 			// the next context block (consumed once by takePendingSignal).

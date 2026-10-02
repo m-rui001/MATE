@@ -33,9 +33,9 @@
  * mode for a secret.
  */
 
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync, createHash } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const ALGO = "aes-256-gcm";
@@ -129,7 +129,10 @@ interface KeyMaterial {
  * stored. Re-deriving on a different machine (a `cp -r` of the whole directory) yields a different
  * key because the fingerprint differs, so every sealed entry fails GCM auth and reads as empty.
  */
-export function loadKey(stateDir: string, fingerprintOverride?: string): { key: Buffer; keyFile: string; foreign: boolean } {
+export function loadKey(
+	stateDir: string,
+	fingerprintOverride?: string,
+): { key: Buffer; keyFile: string; foreign: boolean } {
 	const kf = keyPath(stateDir);
 	mkdirSync(dirname(kf), { recursive: true });
 	const fp = fingerprintOverride ?? machineFingerprint();
@@ -137,7 +140,11 @@ export function loadKey(stateDir: string, fingerprintOverride?: string): { key: 
 	if (existsSync(kf)) {
 		material = JSON.parse(readFileSync(kf, "utf8")) as KeyMaterial;
 	} else {
-		material = { secret: randomBytes(32).toString("base64"), salt: randomBytes(16).toString("hex"), fp: createHash("sha256").update(fp).digest("hex").slice(0, 16) };
+		material = {
+			secret: randomBytes(32).toString("base64"),
+			salt: randomBytes(16).toString("hex"),
+			fp: createHash("sha256").update(fp).digest("hex").slice(0, 16),
+		};
 		writeFileSync(kf, JSON.stringify(material), { mode: 0o600 });
 		try {
 			chmodSync(kf, 0o600);
@@ -173,15 +180,29 @@ export function decrypt(key: Buffer, entry: SealedEntry): string {
 }
 
 /** Append a sealed entry. Returns the new store (caller persists it). */
-export function seal(store: SealedStore, key: Buffer, kind: SealedEntry["kind"], plaintext: string, hint = ""): SealedStore {
+export function seal(
+	store: SealedStore,
+	key: Buffer,
+	kind: SealedEntry["kind"],
+	plaintext: string,
+	hint = "",
+): SealedStore {
 	const { ct, iv, tag } = encrypt(key, plaintext);
-	const id = createHash("sha1").update(`${Date.now()}:${ct.slice(0, 32)}:${store.entries.length}`).digest("hex").slice(0, 12);
+	const id = createHash("sha1")
+		.update(`${Date.now()}:${ct.slice(0, 32)}:${store.entries.length}`)
+		.digest("hex")
+		.slice(0, 12);
 	const entry: SealedEntry = { id, kind, t: Date.now(), ct, iv, tag, hint: hint.slice(0, 80) };
 	return { version: store.version, entries: [...store.entries, entry].slice(-512) };
 }
 
 /** Read back the most recent n entries of a kind, decrypted. Bounded so context stays small. */
-export function unseal(store: SealedStore, key: Buffer, kind?: SealedEntry["kind"], n = 4): Array<{ kind: string; text: string; hint: string; t: number }> {
+export function unseal(
+	store: SealedStore,
+	key: Buffer,
+	kind?: SealedEntry["kind"],
+	n = 4,
+): Array<{ kind: string; text: string; hint: string; t: number }> {
 	const entries = kind ? store.entries.filter((e) => e.kind === kind) : store.entries;
 	return entries
 		.slice(-n)
@@ -210,7 +231,10 @@ export function publicView(state: import("./types.ts").MateState): Record<string
  * is what keeps a secret a secret even while the model is allowed to allude to having one.
  */
 export function sealedHints(store: SealedStore): string[] {
-	return store.entries.slice(-6).map((e) => e.hint).filter(Boolean);
+	return store.entries
+		.slice(-6)
+		.map((e) => e.hint)
+		.filter(Boolean);
 }
 
 const r2 = (x: number) => Math.round(x * 100) / 100;

@@ -27,7 +27,7 @@
 
 import { DECOHERENCE, HAMILTONIAN, HAMILTONIAN_INTENSITY, WHEEL_COUPLING } from "./params.ts";
 import { clamp01 } from "./rng.ts";
-import { EMOTIONS, type ComplexCell, type DensityMatrixState, type EmotionVector } from "./types.ts";
+import { type ComplexCell, type DensityMatrixState, EMOTIONS, type EmotionVector } from "./types.ts";
 
 export type Complex = ComplexCell;
 export type DensityMatrix = DensityMatrixState;
@@ -158,11 +158,7 @@ export function wheelCoupling(i: number, j: number): number {
  * This H is NOT diagonal, so two events with different activations give H_A, H_B with [H_A,H_B]!=0
  * and therefore U_A U_B != U_B U_A - the mathematical source of the order effect.
  */
-export function buildHamiltonian(
-	activations: Partial<EmotionVector>,
-	personalityO: number,
-	trust: number,
-): number[][] {
+export function buildHamiltonian(activations: Partial<EmotionVector>, personalityO: number, trust: number): number[][] {
 	const p = EMOTIONS.map((e) => clamp01(activations[e] ?? 0));
 	const g = WHEEL_COUPLING * (1 + 0.5 * personalityO) * (1 + trust);
 	const H: number[][] = [];
@@ -228,7 +224,7 @@ export function unitaryFromH(H: number[][], theta: number): ComplexCell[][] {
 	for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) norm += H[i][j] * H[i][j];
 	norm = theta * Math.sqrt(norm);
 	const s = Math.max(0, Math.ceil(Math.log2(Math.max(norm, 1e-12) / 0.5)));
-	const scale = 1 / Math.pow(2, s);
+	const scale = 2 ** -s;
 
 	// A = -i * theta * scale * H  (pure imaginary entries).
 	const A = cmat(n);
@@ -354,10 +350,11 @@ export function applyKick(rho: DensityMatrix, U: ComplexCell[][]): DensityMatrix
 			}
 			out[i][j] = [re, im];
 		}
-	for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
-		rho[i][j][0] = out[i][j][0];
-		rho[i][j][1] = out[i][j][1];
-	}
+	for (let i = 0; i < n; i++)
+		for (let j = 0; j < n; j++) {
+			rho[i][j][0] = out[i][j][0];
+			rho[i][j][1] = out[i][j][1];
+		}
 	return rho;
 }
 
