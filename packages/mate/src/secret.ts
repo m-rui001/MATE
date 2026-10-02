@@ -24,12 +24,17 @@
  * it nor the user can trivially dump the whole sealed self, and the plaintext never lands in the
  * session transcript that pi writes to disk.
  *
- * The key is derived from a birth secret held in a file with 0600 perms, outside the session dir.
- * It is never placed in the prompt. If the key file is lost, the sealed tier is unrecoverable -
- * which is the correct failure mode for a secret.
+ * The key is derived from a birth secret held in a file with 0600, mixed with a fingerprint of THIS
+ * machine, so the sealed self is bound to the hardware it was born on. The public state can be
+ * copied, but a `cp -r` of the state directory onto another machine yields an inert sealed tier: the
+ * fingerprint differs, so scrypt derives a different key, and AES-GCM auth fails on every entry
+ * (decrypt() returns "" - a secret that cannot be opened stays closed). It is never placed in the
+ * prompt. If the key file is lost, the sealed tier is unrecoverable - which is the correct failure
+ * mode for a secret.
  */
 
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync, createHash } from "node:crypto";
+import * as os from "node:os";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -63,17 +68,76 @@ export function keyPath(stateDir: string): string {
 }
 
 /**
- * Load or create the birth key. Created once, 0600, never logged, never prompted.
- * The salt is stored alongside so the same passphrase-less key is reproducible on this machine.
+ * A stable fingerprint of THIS machine, used to pepper the sealed key.
+ *
+ * The tension: it must be (a) the same across reboots on one machine, so the companion can always
+ * reopen its own sealed self at home, and (b) different across machines, so a `cp -r` of the state
+ * directory yields an inert copy elsewhere. So we PREFER the OS machine-id (/etc/machine-id, created
+ * at install, stable, unique per install) and only fall back to volatile signals - hostname, the
+ * platform/arch tuple, and MAC addresses - when no machine-id is readable (unusual, or a container
+ * without one). The fallback is noisier, which is the honest tradeoff: on a plain user laptop the id is present and the binding is
+ * rock-stable; where it is absent we degrade to best-effort rather than refusing to bind at all.
  */
-export function loadKey(stateDir: string): { key: Buffer; keyFile: string } {
+export function machineFingerprint(): string {
+	// Preferred: a persistent per-install identifier.
+	for (const p of ["/etc/machine-id", "/var/lib/dbus/machine-id", "/mnt/host/etc/machine-id"]) {
+		try {
+			if (existsSync(p)) {
+				const mid = readFileSync(p, "utf8").trim();
+				if (mid) return createHash("sha256").update(`mid:${mid}`).digest("hex");
+			}
+		} catch {
+			/* unreadable; try the next source */
+		}
+	}
+	// Fallback: best-effort tuple. Less stable, but still differs across machines in general.
+	const parts: string[] = ["nofp"];
+	try {
+		parts.push(os.hostname());
+	} catch {
+		/* ignore */
+	}
+	try {
+		parts.push(`${os.platform()}:${os.arch()}`);
+	} catch {
+		/* ignore */
+	}
+	try {
+		const ifaces = os.networkInterfaces();
+		for (const name of Object.keys(ifaces)) {
+			for (const a of ifaces[name] ?? []) {
+				if (a.mac && a.mac !== "00:00:00:00:00:00") parts.push(a.mac);
+			}
+		}
+	} catch {
+		/* ignore */
+	}
+	return createHash("sha256").update(parts.join("|")).digest("hex");
+}
+
+interface KeyMaterial {
+	secret: string;
+	salt: string;
+	/** Fingerprint tag at birth, so a copy to another machine can be detected without opening anything. */
+	fp?: string;
+}
+
+/**
+ * Load or create the birth key. Created once, 0600, never logged, never prompted.
+ *
+ * The AES key is scrypt(secret, salt + machineFingerprint) - the fingerprint is a PEPPER, never
+ * stored. Re-deriving on a different machine (a `cp -r` of the whole directory) yields a different
+ * key because the fingerprint differs, so every sealed entry fails GCM auth and reads as empty.
+ */
+export function loadKey(stateDir: string, fingerprintOverride?: string): { key: Buffer; keyFile: string; foreign: boolean } {
 	const kf = keyPath(stateDir);
 	mkdirSync(dirname(kf), { recursive: true });
-	let material: { secret: string; salt: string };
+	const fp = fingerprintOverride ?? machineFingerprint();
+	let material: KeyMaterial;
 	if (existsSync(kf)) {
-		material = JSON.parse(readFileSync(kf, "utf8"));
+		material = JSON.parse(readFileSync(kf, "utf8")) as KeyMaterial;
 	} else {
-		material = { secret: randomBytes(32).toString("base64"), salt: randomBytes(16).toString("hex") };
+		material = { secret: randomBytes(32).toString("base64"), salt: randomBytes(16).toString("hex"), fp: createHash("sha256").update(fp).digest("hex").slice(0, 16) };
 		writeFileSync(kf, JSON.stringify(material), { mode: 0o600 });
 		try {
 			chmodSync(kf, 0o600);
@@ -82,8 +146,12 @@ export function loadKey(stateDir: string): { key: Buffer; keyFile: string } {
 		}
 	}
 	// scrypt: expensive on purpose so a leaked key file plus disk image is still slow to brute force.
-	const key = scryptSync(material.secret, material.salt, 32);
-	return { key, keyFile: kf };
+	// The fingerprint is appended to the salt as a machine-bound pepper.
+	const key = scryptSync(material.secret, `${material.salt}:${fp}`, 32);
+	// If the birth fingerprint tag disagrees with this machine's, the directory was moved/copied.
+	const expectedTag = createHash("sha256").update(fp).digest("hex").slice(0, 16);
+	const foreign = material.fp !== undefined && material.fp !== expectedTag;
+	return { key, keyFile: kf, foreign };
 }
 
 export function encrypt(key: Buffer, plaintext: string): { ct: string; iv: string; tag: string } {

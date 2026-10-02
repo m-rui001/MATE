@@ -106,6 +106,7 @@ export class MateRuntime {
 				sealed: { version: 1, entries: [] },
 				key: Buffer.alloc(32),
 				dir: this.dir,
+				foreign: false,
 			};
 		}
 	}

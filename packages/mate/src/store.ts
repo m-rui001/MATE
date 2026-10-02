@@ -30,6 +30,9 @@ export interface Persisted {
 	sealed: SealedStore;
 	key: Buffer;
 	dir: string;
+	/** True when this state directory was born on a different machine: the sealed tier is inert
+	 * (the key cannot be re-derived), so the companion wakes without access to its private self. */
+	foreign: boolean;
 }
 
 const STATE_FILE = "state.json";
@@ -59,7 +62,7 @@ function readJson<T>(path: string): T | null {
 export function load(opts: StoreOptions): Persisted {
 	const dir = opts.dir;
 	mkdirSync(dir, { recursive: true });
-	const { key } = loadKey(dir);
+	const { key, foreign } = loadKey(dir);
 
 	const rawState = readJson<unknown>(join(dir, STATE_FILE));
 	let state = sanitiseState(rawState, { name: opts.name });
@@ -69,7 +72,7 @@ export function load(opts: StoreOptions): Persisted {
 	const rawSealed = readJson<SealedStore>(join(dir, SEALED_FILE));
 	const sealed = rawSealed && typeof rawSealed === "object" && Array.isArray(rawSealed.entries) ? rawSealed : emptySealed();
 
-	return { state, sealed, key, dir };
+	return { state, sealed, key, dir, foreign };
 }
 
 /** Persist state + sealed atomically. Cheap enough to call after every transition. */
