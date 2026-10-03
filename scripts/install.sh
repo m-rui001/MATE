@@ -30,7 +30,14 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 curl -fsSL "$url" -o "$tmp/mate.tar.gz"
 
-echo "Extracting to ${install_dir}..."
+# Replacing files under a running binary is safe on macOS/Linux (the old inode stays
+# alive until the process exits), so unlike the Windows installer no process handling
+# is needed - re-running this script updates in place.
+if [ -d "$install_dir" ]; then
+	echo "Updating mate in ${install_dir}..."
+else
+	echo "Installing mate to ${install_dir}..."
+fi
 rm -rf "$install_dir"
 mkdir -p "$install_dir" "$(dirname "$install_dir")" "$bin_dir"
 tar -xzf "$tmp/mate.tar.gz" -C "$tmp"
