@@ -182,7 +182,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const modelRuntime = options.modelRuntime ?? (await ModelRuntime.create({ authPath, modelsPath }));
 
 	const settingsManager = options.settingsManager ?? SettingsManager.create(cwd, agentDir);
-	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(cwd, agentDir));
+	const sessionManager = options.sessionManager ?? SessionManager.create(cwd, getDefaultSessionDir(agentDir));
 
 	if (!resourceLoader) {
 		resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });

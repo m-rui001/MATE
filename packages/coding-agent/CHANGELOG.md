@@ -4,6 +4,21 @@
 
 ### Added
 
+- Added the `remember` tool (model-only, hidden in the TUI): the model decides what deserves to survive, storing one memory in its own words with topic tags and an importance weight. `ponder` accepts topic tags too.
+
+### Changed
+
+- Inbound messages no longer auto-encode into memory: nothing is written before the model replies, and the only writers are `remember`/`ponder` during the model's own turn. Guidance teaches the model this memory economy (short line + topic tags).
+- Sessions from every working directory now live in one global archive (`~/.mate/agent/sessions/`); the legacy per-cwd subdirectories are merged in on startup. The working directory itself is untouched.
+
+### Removed
+
+- Removed `/tree`, `/fork`, `/clone` (and the double-escape tree/fork shortcut) in companion mode, with an explanatory notice in their place: rewinding, forking or cloning a conversation fractures persona continuity. `/resume` and `/new` remain, and the commands are gone from autocomplete.
+
+## [1.0.1] - 2026-10-03
+
+### Added
+
 - Added the `ponder` tool (model-only, hidden in the TUI): the companion's private thoughts are folded into the memory graph with the private flag, coloured by current mood, and never rendered to the user.
 - Discovered reach-out channels recorded via `feel` are now also written into the memory graph as private memories, so they survive a restart.
 

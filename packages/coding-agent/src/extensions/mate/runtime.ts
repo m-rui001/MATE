@@ -6,8 +6,10 @@
  *     elapsed while the machine was OFF, in closed form (see mate/catchup.ts). This is the whole point
  *     of the fork: a companion that wakes having actually lived through the night.
  *   - Appraisal -> transition -> persist, once per inbound user message. The kernel is a pure function;
- *     this module is the impure shell that feeds it real events and saves the result atomically. Each
- *     inbound message is also folded into the associative memory graph (P4), which grounds later thinking.
+ *     this module is the impure shell that feeds it real events and saves the result atomically. It
+ *     writes NO memory on inbound: memories are model-authored (remember/ponder), so what survives an
+ *     exchange is the model's judgement, and the user's fresh words are never filed as "memory" before
+ *     the model has even replied.
  *   - The reply lean. Per the agency principle (P1: fewer built-in modes), the kernel no longer
  *     gates replies. `replyInclination`
  *     returns an ADVISORY signal that the model reads and may overrule; the model, not this code,
@@ -45,7 +47,6 @@ import {
 	type MateState,
 	type MemoryGraph,
 	minimalContext,
-	nodeKey,
 	openSession,
 	type Persisted,
 	type PreSendChecks,
@@ -63,7 +64,6 @@ import {
 	type Thought,
 	tick,
 	tickEvent,
-	tokenise,
 	transition,
 } from "@earendil-works/pi-mate";
 import { getAgentDir } from "../../config.ts";
@@ -295,10 +295,13 @@ export class MateRuntime {
 	// ---------------------------------------------------------------------------
 
 	/**
-	 * Handle an inbound USER message. Appraises it, advances the affective state, folds it into the
-	 * memory graph, and computes what the message stirred up. Returns an ADVISORY reply lean and the
-	 * recalled memories — it makes no reply/drop/delay decision. Per P1, the model decides whether to
-	 * answer, answer briefly, or let it sit, reading this in the context block. Does NOT compose a reply.
+	 * Handle an inbound USER message. Appraises it, advances the affective state, computes what the
+	 * message stirred up, and returns an ADVISORY reply lean plus the memories it recalled. It makes
+	 * no reply/drop/delay decision and — deliberately — writes NO memory: the message is already in
+	 * the transcript, and what deserves to survive beyond it is the model's call (remember/ponder),
+	 * made during its own turn, not an automatic tokenise-and-store that files the user's raw words
+	 * before the model has even read them. Per P1, the model decides whether to answer, answer
+	 * briefly, or let it sit, reading this in the context block. Does NOT compose a reply.
 	 */
 	onUserMessage(text: string): {
 		appraisal: AppraisalResult;
@@ -320,24 +323,11 @@ export class MateRuntime {
 				t: now,
 			});
 
-			// P4: encode this episode into the graph. The PAD pleasantness becomes the valence on the
-			// edges this message co-activates, so being associated with something unpleasant leaves a
-			// negative trace — the memory is affective, not just factual.
-			this.persisted = {
-				...this.persisted,
-				memory: encode(this.persisted.memory, {
-					text,
-					pad: this.state.mood,
-					t: now,
-				}),
-			};
-
-			// Recall: seed from this message's own tokens and spread activation. Surfaced ephemerally.
-			const seeds = tokenise(text).map(nodeKey);
-			const rec = recall(this.persisted.memory, { seeds, now, limit: 6 });
+			// P4: recall. Memories whose topics or words this message touches surface ephemerally, and
+			// whatever surfaced gets rehearsed (the testing effect), so memories the companion keeps
+			// reaching for persist and ones it never retrieves fade.
+			const rec = recall(this.persisted.memory, { query: text, now, limit: 6 });
 			this.lastRecall = rec;
-			// Testing effect: whatever this message pulled to the surface gets a little stickier, so
-			// memories the companion keeps reaching for persist and ones it never retrieves fade.
 			this.persisted = {
 				...this.persisted,
 				memory: rehearse(
@@ -418,9 +408,9 @@ export class MateRuntime {
 	/** Record a private thought the model wrote via the `ponder` tool. The kernel still advances with a
 	 * low-intensity self_observation event — but with NO event.text, so the plaintext never enters the
 	 * observations ring (that ring is echoed into the prompt as "last thought"). The thought itself is
-	 * folded into the memory graph, marked private: it colours recall like any memory but is excluded
-	 * from the user-visible summary (see memory.ts). */
-	ponder(text: string, intensity = 0.3): void {
+	 * encoded as a private memory, and any topics ride the event so SPARK can crystallise beliefs
+	 * about the subject. */
+	ponder(text: string, intensity = 0.3, topics: string[] = []): void {
 		try {
 			const now = Date.now();
 			this.applyEvent({
@@ -428,11 +418,52 @@ export class MateRuntime {
 				activations: {},
 				intensity: 0.1 + 0.2 * intensity,
 				intent: "chat",
+				topics,
 				t: now,
 			});
 			this.persisted = {
 				...this.persisted,
-				memory: encode(this.persisted.memory, { text, pad: this.state.mood, t: now, private: true }),
+				memory: encode(this.persisted.memory, {
+					text,
+					pad: this.state.mood,
+					t: now,
+					private: true,
+					topics,
+				}),
+			};
+			this.persistSafe();
+		} catch (err) {
+			this.onError(err);
+		}
+	}
+
+	/**
+	 * Store a memory the model wrote via the `remember` tool. This is the only path into the memory
+	 * store besides ponder: the model decides THAT something is worth keeping and WHAT to write down,
+	 * during its own turn. A low-intensity self_observation event (no text) rides along so tagged
+	 * topics crystallise as SPARK beliefs; the affective nudge is deliberately negligible — taking a
+	 * note is not an emotional event.
+	 */
+	remember(text: string, topics: string[] = [], importance = 0.3): void {
+		try {
+			const now = Date.now();
+			this.applyEvent({
+				kind: "self_observation",
+				activations: {},
+				intensity: 0.05 + 0.1 * Math.max(0, Math.min(1, importance)),
+				intent: "chat",
+				topics,
+				t: now,
+			});
+			this.persisted = {
+				...this.persisted,
+				memory: encode(this.persisted.memory, {
+					text,
+					pad: this.state.mood,
+					t: now,
+					topics,
+					importance,
+				}),
 			};
 			this.persistSafe();
 		} catch (err) {

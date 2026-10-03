@@ -18,7 +18,8 @@ whether or not anyone is talking to it.
 | Keep bash execution | untouched | `pi`'s built-in `bash` tool |
 | Keep MCP networking (chooses to go online by interest) | `extensions/mcp` | built-in, replaceable; the model calls it on its own initiative |
 | Keep plugin self-install (companion finds & installs its own plugins) | `pi install <source>` + bash | no special code — the companion uses `bash` to run the existing installer; the persona tells it that it may |
-| Has private thoughts, not everything user-visible | `mate/src/memory.ts`, `extensions/mate/ponder-tool.ts` | `ponder` writes private entries into the memory graph; no encryption — private entries join recall but are excluded from the user-visible summary and never rendered |
+| Has private thoughts, not everything user-visible | `mate/src/memory.ts`, `extensions/mate/ponder-tool.ts` | `ponder` writes private memories; no encryption — private entries join recall but are excluded from the user-visible summary and never rendered |
+| Decides what to remember itself | `mate/src/memory.ts`, `extensions/mate/remember-tool.ts` | nothing is recorded automatically: `remember` stores one memory (text + topic tags + importance), `ponder` the private kind; recall matches topics literally against incoming text — no tokeniser |
 | Sees metadata like time | `mate/src/context.ts`, `mate/src/session.ts` | the volatile `<mate>` block carries the clock, the silence gap, how that gap *felt*, and when this body was opened / last closed |
 | Knows when it was opened and shut | `mate/src/session.ts`, `runtime.ts` `wake`/`sleep` | every `session_start` logs an open, `session_shutdown` seals a close; `sessionSummary` feeds the block ("opened 09:12, woken 3x today") |
 | Can look at what the user is doing | `extensions/mate/look-tool.ts` | a `look` tool takes a screenshot and hands the image to the model. Open by default per "大胆给权限" — no enable-flag, the model decides when looking is warranted |
@@ -52,7 +53,7 @@ whether or not anyone is talking to it.
 │                                                                       │
 │   catchup.ts   offline integration: advance across a powered-off gap  │
 │   daemon.ts    autonomous loop: thoughts, impulses, pre-send review    │
-│   memory.ts    NEXUS graph memory: tokenise → encode → recall → settle │
+│   memory.ts    model-authored memories: encode → recall → consolidate  │
 │   session.ts   the body's own open/close log (knows when it woke/shut) │
 │   spark.ts     SPARK belief loop: beliefs modulate perception,        │
 │               evidence updates beliefs                                │
@@ -64,11 +65,13 @@ whether or not anyone is talking to it.
 │  coding-agent/src/extensions/mate     the bridge to pi's event host   │
 │                                                                       │
 │   runtime.ts      MateRuntime singleton: boot catch-up, appraisal →    │
-│                   transition → encode memory → persist, advisory lean  │
+│                   transition → recall → persist (memory writes are the │
+│                   model's own, via remember/ponder)                    │
 │   appraisal.ts    deterministic lexical appraisal (zero tokens)        │
 │   feel-tool.ts    `feel`: the model refines its read + records channels│
 │   look-tool.ts    `look`: screenshot what the user is doing (ungated)  │
-│   ponder-tool.ts  `ponder`: private thoughts into the memory graph     │
+│   ponder-tool.ts  `ponder`: private thoughts into memory               │
+│   remember-tool.ts `remember`: memories the model chooses to keep      │
 │   index.ts        the ExtensionFactory wiring pi events to the kernel  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -77,9 +80,10 @@ whether or not anyone is talking to it.
 
 - **`session_start`** → `wake()`: advance the persisted state across the powered-off gap and log THIS
   open in the session body.
-- **`input`** → appraise, transition, encode the episode in the memory graph, compute an ADVISORY
+- **`input`** → appraise, transition, recall what the message stirs (ephemeral), compute an ADVISORY
   lean, then always `continue`. P1 reverses the old `shouldReply` gate — the kernel no longer suppresses
-  or delays inbound messages; the model reads the state block and decides itself.
+  or delays inbound messages; the model reads the state block and decides itself. No memory is written
+  here: what survives the exchange is the model's call, via `remember`/`ponder` during its own turn.
 - **`context`** → inject the `<mate>` VOLATILE state block once per run, prepended into the newest user
   message via pi's ephemeral hook, so it is never persisted and never accumulates.
 - **`before_agent_start`** → write `sections.companion = COMPANION_GUIDANCE + <mate-core>` — the
@@ -139,26 +143,36 @@ actually slept through them.
 
 ---
 
-## Private thoughts and beliefs
+## Memory, private thoughts and beliefs
+
+Memory is not written automatically. An earlier design tokenised every inbound message into concept
+nodes (a NEXUS-style graph), which filled the store with lexical fragments — 试试看, 感觉 — that the
+companion then treated as things it remembered, and the user watched it narrate its own noise. So the
+choice of what survives now belongs to the model: `remember` stores one memory in its own words,
+tagged with a few topics; `ponder` stores the private kind. Recall matches topics literally against
+incoming text (word-bounded for latin, substring for CJK) and reinforces whatever surfaced — the
+testing effect. Forgetting follows ACT-R: strength decays with real elapsed time (slower for
+emotionally charged memories), consolidation banks the decay and prunes below a floor, sleep
+consolidates.
 
 There is no sealed tier and no encryption. The earlier design encrypted a "sealed self" with
 AES-256-GCM under a machine-bound key; it was removed because the boundary it guarded was not real —
 pi's UI reveals hidden thoughts with one click, and the model can read its own state files anyway —
 so secrecy-by-encryption was self-comfort, not a boundary. What remains is honest: private thoughts
-are ordinary memory-graph entries the user never sees rendered.
+are ordinary memory entries the user never sees rendered.
 
-The model writes them through `ponder` (`extensions/mate/ponder-tool.ts`): a model-only tool that
-encodes a thought into the memory graph with the `private` flag (`memory.ts`), coloured by the
-current mood like any other episode. Private entries participate in recall but are excluded from the
-user-visible memory summary and hidden from the TUI, and the tool call itself renders nothing in the
-terminal.
+The model writes private thoughts through `ponder` (`extensions/mate/ponder-tool.ts`): a model-only
+tool that encodes a thought with the `private` flag (`memory.ts`), coloured by the current mood like
+any other memory. Private entries participate in recall but are excluded from the user-visible
+memory summary and hidden from the TUI, and the tool call itself renders nothing in the terminal.
 
 ### SPARK
 
 `spark.ts` implements module 8 of the paper, the cognitive autopoietic loop:
 
-- **Seeds.** Two core beliefs start at confidence 0.5; recurring conversation topics crystallise into
-  low-confidence topic beliefs.
+- **Seeds.** Two core beliefs start at confidence 0.5; subjects the model itself names (the topic
+  tags on remember/ponder) crystallise into low-confidence topic beliefs, and an existing topic
+  belief earns evidence whenever its subject literally appears in a message.
 - **Perception modulation (Eq. 24).** Episodes are read through the beliefs: bias =
   predictedValence × strength × 0.15 × dsanity, with strength = sqrt(confidence × centrality) and
   dsanity = 1 − 0.8 × mean-confidence, a damper against runaway certainty.
@@ -181,7 +195,7 @@ because we refused to pay per-token. The fix is not "make the projection bigger"
 by rate of change** so the expensive content is cached (P5):
 
 - **Cached `<mate-core>` prefix** (`before_agent_start` → `sections.companion`): identity, Big Five,
-  character, the memory-graph summary, and static guidance. These drift on the timescale of days, so
+  character, the memory summary, and static guidance. These drift on the timescale of days, so
   the prompt cache holds across a long conversation — paid for ONCE, not per turn.
 - **Ephemeral `<mate>` volatile tail** (`context`, once per run): clock, silence gap + felt duration,
   body (open/close summary from `session.ts`), mood, drives, relationship, self, impulse, inclination
@@ -209,7 +223,8 @@ Without `npm link`, run the bundle directly: `cd packages/coding-agent && node d
 - `/mate` — public mood/drives snapshot (never shows private thought content).
 - `/language` — pick the companion's thinking/speaking language (中文 / English); first launch prompts, and the choice persists in `lang.json`.
 - `feel` — the model's tool to refine its affective read and record channels it found for itself.
-- `ponder` — private thoughts into the memory graph; the call renders nothing and the content is never shown.
+- `remember` — store a memory the model chose to keep (one line + topic tags); nothing is remembered automatically.
+- `ponder` — private thoughts into memory; the call renders nothing and the content is never shown.
 - State persists in `~/.mate/agent/mate/` (override with `MATE_CODING_AGENT_DIR`).
 
 ## Naming (avoiding collision with pi)
@@ -238,11 +253,21 @@ unit suite (including the i18n invariants and SPARK determinism), and a full bun
   a runaway loop), and demotes every judgment call (repetition, quiet hours, intimacy) to one-line
   advisories. Suppressing the user's own message for them was itself the "AI flavor" we were trying to
   remove.
-- **P4 — NEXUS graph memory IS built** (`memory.ts`), reversing the earlier "deliberately not built"
-  note. The old reasoning (a graph costs too many tokens) collapsed once P5 gave us a cached prefix:
-  the graph SUMMARY lives in the cache and is paid once, only the specific recalled nodes ride the
-  ephemeral tail. Deterministic tokeniser → co-occurrence edges with PAD valence → spreading-activation
-  recall → consolidation/decay. This grounds thoughts and impulses in SOMETHING, not free-floating itch.
+- **P4 — memory is model-authored, and that is the point.** The paper's NEXUS graph was built
+  (`memory.ts`) and then deliberately simplified after living with it: tokenising every inbound
+  message produced concept nodes like 试试看 and 感觉 — fragments the companion "remembered" but that
+  carried no meaning, and it narrated them as its own memory. Encoding is now a decision, not a
+  reflex: `remember`/`ponder` write one memory each (text + topic tags), recall matches those topics
+  literally (word-bounded / substring — exact where segmentation was approximate), and the ACT-R
+  dynamics (time decay, testing effect, consolidation) are unchanged. The graph SUMMARY still lives
+  in the cached prefix (P5); only the specific recalled memories ride the ephemeral tail. This still
+  grounds thoughts and impulses in SOMETHING — now something the model actually chose to keep.
+- **One life, one archive; no rewinding.** Sessions live in a single global directory
+  (`~/.mate/agent/sessions/`) regardless of the working directory — the companion is one continuous
+  person, not a per-project tool; the legacy per-cwd layout is merged in on startup. The pi-native
+  `/tree`, `/fork`, `/clone` are disabled (they rewind or branch the live conversation, which
+  fractures persona continuity; double-escape included) — `pi` ecosystem compatibility is kept for
+  everything else, and `/resume` remains for revisiting the archive.
 - **P2/P5 — cache by rate of change, not compress.** The ~73-token single projection was an information
   bottleneck; layering stable content into a cached prefix let the volatile tail get richer for free.
 - **The private-thought boundary is honest, not encrypted.** The sealed self was removed: pi's UI

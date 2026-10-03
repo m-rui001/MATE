@@ -67,11 +67,10 @@ export interface ContextOptions {
 export interface StableContextOptions {
 	/** Display name. The kernel does not store the name (a host concern), so it is passed in. */
 	name?: string;
-	/** The memory graph to summarise; omit for a no-graph companion. */
+	/** The memory store to summarise; omit for a companion with no memories. */
 	memory?: MemoryGraph;
-	/** Cap on graph nodes/edges in the summary. */
+	/** Cap on memories shown in the summary. */
 	memoryNodes?: number;
-	memoryEdges?: number;
 	/** Max characters for the whole block. */
 	maxChars?: number;
 	/** Prompt language for the labels (default "en"). */
@@ -194,11 +193,10 @@ export function stableContext(state: MateState, opts: StableContextOptions = {})
 	const b = state.allostasis.baselineShift;
 	lines.push(kv(L.baseline, `${q(b.p)},${q(b.a)},${q(b.d)}`, lang));
 
-	// Memory-graph summary: top concepts by strength + strongest ties. Changes slowly.
+	// Memory summary: the memories the model chose to keep, top by strength. Changes slowly.
 	if (opts.memory) {
 		const summary = memorySummary(opts.memory, {
 			nodes: opts.memoryNodes ?? 12,
-			edges: opts.memoryEdges ?? 10,
 			lang,
 		});
 		if (summary) lines.push(summary);
@@ -305,7 +303,7 @@ export function stateContext(state: MateState, opts: ContextOptions = {}): strin
 	if (opts.recall?.length) {
 		const hits = opts.recall
 			.slice(0, 5)
-			.map((h) => `${h.label}${h.hop > 0 ? `~${h.hop}` : ""}`)
+			.map((h) => h.label)
 			.join(L.sep);
 		lines.push(kv(L.recalled, hits, lang));
 	}

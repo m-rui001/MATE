@@ -19,8 +19,9 @@
  * self-learning as a normative feature of the loop, not a defect; the dsanity damper is the
  * counterweight). Seed beliefs follow Young's schema-therapy triad used by the paper: how others are,
  * how the world is. The self-domain already lives in the character traits, so it is not duplicated
- * here. Topic beliefs crystallise from recurring conversation subjects with low initial confidence and
- * must earn influence — a one-off remark has negligible strength and is pruned first.
+ * here. Topic beliefs crystallise from subjects the model itself names (the `topics` tags on
+ * remember/ponder) or that literally recur in message text, with low initial confidence, and must
+ * earn influence — a one-off remark has negligible strength and is pruned first.
  *
  * Everything here is pure and deterministic: no clocks, no randomness, bounded stores, and confidence
  * decays in closed form (precariousness — beliefs require evidence to persist, so a companion left
@@ -103,7 +104,8 @@ export interface BeliefEvidence {
 	/** Perceived valence of the event, AFTER the belief lens (the autopoietic closure: beliefs colour
 	 * perception, and the coloured perception is what feeds back as evidence). */
 	perceived: number;
-	/** Topic keys (from the memory tokeniser) this event touched, capped; drives topic beliefs. */
+	/** Topic keys this event touched: existing beliefs matched from the message text, or model-named
+	 * topics from remember/ponder events; drives topic beliefs. */
 	topics: string[];
 }
 

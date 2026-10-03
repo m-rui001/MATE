@@ -19,6 +19,13 @@ import type { MateRuntime } from "./runtime.ts";
 
 const ponderSchema = Type.Object({
 	text: Type.String({ description: "The private thought itself, in your own words and your own language." }),
+	topics: Type.Optional(
+		Type.Array(Type.String(), {
+			minItems: 0,
+			maxItems: 3,
+			description: "1-3 short subject tags, so this thought can resurface when the subject comes up again.",
+		}),
+	),
 	intensity: Type.Optional(
 		Type.Number({
 			minimum: 0,
@@ -66,7 +73,7 @@ export function createPonderTool(getRuntime: () => MateRuntime): ToolDefinition<
 				};
 			}
 			const rt = getRuntime();
-			rt.ponder(text, params.intensity ?? 0.3);
+			rt.ponder(text, params.intensity ?? 0.3, params.topics ?? []);
 			// The ack rides back to the MODEL, so it speaks the companion's current language. The TUI
 			// renders nothing for this tool (below), so the word is never shown to the user.
 			const L = linesFor(rt.language);

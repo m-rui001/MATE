@@ -23,13 +23,14 @@ import { applyBeliefEvidence, beliefLens, centralityOf, dsanityOf, seedBeliefSto
 const HOUR = 3_600_000;
 
 /** One warm contact event with a distinct topic word. */
-function warmEvent(t: number, text?: string) {
+function warmEvent(t: number, text?: string, topics?: string[]) {
 	return {
 		kind: "user_message" as const,
 		activations: { joy: 0.8, trust: 0.6 },
 		intensity: 1,
 		intent: "chat" as const,
 		text,
+		topics,
 		t,
 	};
 }
@@ -130,16 +131,43 @@ describe("SPARK: the loop through the kernel", () => {
 		expect(h.beliefs.othersTrustworthy.confidence).toBeGreaterThan(0.5);
 	});
 
-	it("crystallises at most two topic beliefs per message, from the message's own words", () => {
+	it("crystallises topic beliefs from model-named topics, not from raw message words", () => {
 		let s = birth({ seed: 6, born: 0 });
-		// Segmented (verified output): 今天天气 | 很好 | 我们 | 一起去 | 散步 | 吧(粒子, dropped).
+		// Message text alone no longer sprays the belief store: the tokeniser era is gone, and a
+		// rambling message cannot invent beliefs for its own fragments.
 		s = transition(s, warmEvent(HOUR, "今天天气很好我们一起去散步吧"), HOUR).state;
+		const afterText = Object.keys(s.beliefs).filter((k) => k !== "othersTrustworthy" && k !== "worldSafety");
+		expect(afterText).toEqual([]);
+
+		// Topics arrive NAMED — the topics tags on remember/ponder — and crystallise as weak beliefs.
+		s = transition(s, warmEvent(s.t + HOUR, "聊到了下周的面试", ["面试"]), HOUR).state;
 		const topicKeys = Object.keys(s.beliefs).filter((k) => k !== "othersTrustworthy" && k !== "worldSafety");
-		expect(topicKeys).toContain("今天天气");
-		expect(topicKeys).toContain("很好");
-		expect(topicKeys).not.toContain("散步"); // capped at two topics per event
-		expect(topicKeys).not.toContain("我们");
-		expect(topicKeys).not.toContain("吧"); // particles never become beliefs
+		expect(topicKeys).toEqual(["面试"]);
+		expect(s.beliefs["面试"].confidence).toBe(SPARK.topicSeedConfidence);
+	});
+
+	it("feeds evidence to a topic belief when its subject appears in the message text", () => {
+		let s = birth({ seed: 6, born: 0 });
+		s = transition(s, warmEvent(HOUR, undefined, ["面试"]), HOUR).state;
+		const before = s.beliefs["面试"];
+		expect(before).toBeDefined();
+		// A hostile message that literally touches the subject (word/substring match, no tokeniser)
+		// feeds the belief negative evidence: its valence turns toward the experience.
+		s = transition(
+			s,
+			{
+				kind: "user_message",
+				activations: { anger: 0.7, fear: 0.5 },
+				intensity: 1,
+				intent: "chat",
+				text: "面试搞砸了，别提了",
+				t: s.t + HOUR,
+			},
+			HOUR,
+		).state;
+		const after = s.beliefs["面试"];
+		expect(after.valence).toBeLessThan(before.valence);
+		expect(after.count).toBeGreaterThan(before.count);
 	});
 
 	it("keeps beliefs precarious: without evidence they relax toward the floor across a gap", () => {

@@ -8,7 +8,7 @@
  * what makes offline catch-up (see catchup.ts) sound.
  */
 
-import { tokenise } from "./memory.ts";
+import { topicMatchesText } from "./memory.ts";
 import {
 	AWARENESS_DECAY,
 	BOREDOM,
@@ -661,14 +661,24 @@ export function transition(state: MateState, event: MateEvent, dtOverride?: numb
 	// by dsanity. Precariousness runs on every transition: confidence relaxes toward the floor
 	// without evidence.
 	let beliefs = decayBeliefs(state.beliefs, dt);
-	if (contactKind !== null) {
+	// Topics arrive two ways, both deliberate: model-named topics ride remember/ponder events
+	// (event.topics) and crystallise into new beliefs; on contact events, existing topic beliefs bear
+	// evidence when their subject literally appears in the message text — topic matching is a
+	// word/substring check (see memory.topicMatchesText), no tokeniser involved. Seed beliefs always
+	// bear on contact (they are priors about the interlocutor and the world, not about a subject).
+	// The overall cap keeps one event from spraying the store.
+	const eventTopics = (event.topics ?? []).slice(0, 4);
+	if (contactKind !== null || eventTopics.length > 0) {
 		const evidence = padCentre(event.activations).p;
-		// Belief topics come from the message's own content tokens (identity only, never the affective
-		// math), capped so a rambling message cannot spray the store.
-		const topics = event.text
-			? [...new Set(tokenise(event.text).filter((tok) => !tok.includes("_")))].slice(0, 2)
-			: [];
-		const seedKeys = seedBeliefsFor(contactKind);
+		const text = event.text;
+		const touched =
+			contactKind !== null && text
+				? Object.values(beliefs)
+						.filter((b) => topicMatchesText(b.key, text))
+						.map((b) => b.key)
+				: [];
+		const topics = [...new Set([...touched, ...eventTopics])].slice(0, 4);
+		const seedKeys = contactKind !== null ? seedBeliefsFor(contactKind) : [];
 		const applying = Object.values(beliefs).filter((b) => seedKeys.includes(b.key) || topics.includes(b.key));
 		const lens = beliefLens(beliefs, applying);
 		const perceived = lens ? clampPad(evidence * (1 + Math.sign(evidence) * lens.bias)) : evidence;

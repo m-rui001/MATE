@@ -22,7 +22,7 @@
 
 import { type Lang, linesFor } from "./i18n.ts";
 import { boredomOf, burstOf, energyOf } from "./kernel.ts";
-import { type MemoryGraph, recall, topNodes } from "./memory.ts";
+import { type MemoryGraph, topNodes } from "./memory.ts";
 import { HABITUATION_TAU } from "./params.ts";
 import type { Awareness, MateState, Thought } from "./types.ts";
 
@@ -120,12 +120,14 @@ export function generateThoughts(
 	}
 
 	// curiosity: the curiosity drive, amplified by openness and the curiosity trait. Grounded in a
-	// recalled node when possible — curiosity about SOMETHING specific beats free-floating itch.
+	// specific memory when possible — curiosity about SOMETHING specific beats free-floating itch.
 	if (drives.curiosity > 0.5) {
 		const c = (drives.curiosity - 0.5) * 2 * (0.4 + state.personality.o) * (0.5 + ch.curiosity);
-		// Widen recall to top-1 concept that ISN'T the silence seed, so thoughts vary.
+		// Widen to the top active memories that AREN'T the silence seed, so thoughts vary.
 		const curious = memory
-			? recall(memory, { seeds: topNodes(memory, now, 4), now, limit: 4 }).find((h) => h.label !== seedLabel)
+			? topNodes(memory, now, 4)
+					.map((k) => memory.nodes[k])
+					.find((n) => n && n.label !== seedLabel)
 			: undefined;
 		mk("curiosity", L.thCuriosity(curious?.label ?? ""), c, curious ? `curiosity:${curious.label}` : "curiosity");
 	}

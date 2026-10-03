@@ -23,8 +23,9 @@ import {
 	nodeKey,
 	recall,
 	rehearse,
+	sanitiseMemory,
 	summary,
-	tokenise,
+	topicMatchesText,
 	topNodes,
 } from "../src/memory.ts";
 
@@ -157,89 +158,126 @@ describe("memory: the testing effect (rehearse)", () => {
 });
 
 describe("memory: recall scoring has no double-counted recency", () => {
-	it("a seed node's score is dominated by its effective (time-decayed) strength", () => {
-		// Before the fix, seeds added BOTH a raw-strength term AND a separate recencyWeight term,
-		// so a stale node could keep ranking high purely because of the additive recency — a mild
-		// form of the same problem consolidate was fixing. Now the score is activation-only.
-		const fresh = neutral("fresh", 0.35, 0);
+	it("a topic-matched memory scores by its effective (time-decayed) strength", () => {
+		// The score is activation-only (time-decayed strength plus a slice of salience), so a fresh
+		// memory reads exactly its activation, and time actually reduces what it contributes.
+		const fresh: MemoryNode = {
+			...neutral("fresh", 0.35, 0),
+			topics: ["fresh"],
+		};
 		const g = graphOf([fresh]);
-		const hits = recall(g, { seeds: ["fresh"], now: 0 });
+		const hits = recall(g, { query: "tell me about the fresh thing", now: 0 });
+		expect(hits).toHaveLength(1);
 		expect(hits[0].score).toBeCloseTo(0.35 * 0.6 + 0 * 0.4, 5);
-		// Advance a long time — the same recall on the same graph now yields a much lower score,
-		// because time actually reduces what the node contributes.
-		const stale = recall(g, { seeds: ["fresh"], now: 20 * DAY });
-		expect(stale[0].score).toBeLessThan(0.02);
+		// Advance a long time — the same recall now returns nothing at all, because the memory has
+		// decayed below retrieval range. Time is the forgetting mechanism, not a ranking bonus.
+		const stale = recall(g, { query: "tell me about the fresh thing", now: 20 * DAY });
+		expect(stale).toHaveLength(0);
+	});
+
+	it("matches by topic (strong) and by content words of the memory itself (weaker)", () => {
+		const tagged: MemoryNode = { ...neutral("tagged", 0.5, 0), topics: ["面试"] };
+		const untagged: MemoryNode = {
+			...neutral("untagged", 0.5, 0),
+			label: "she is preparing a job interview",
+		};
+		const g = graphOf([tagged, untagged]);
+		// The topic hits with factor 1.0, the label-word hit with a lower factor, so the tagged
+		// memory ranks first on equal strength.
+		const hits = recall(g, { query: "面试感觉很紧张, thinking about my interview", now: 0 });
+		expect(hits[0].key).toBe("tagged");
+		expect(hits).toHaveLength(2);
+		// A latin topic never matches inside another word.
+		expect(topicMatchesText("work", "I have too much network traffic")).toBe(false);
 	});
 });
 
-describe("memory: tokenise + encode basics (unchanged guarantees)", () => {
-	it("is deterministic and case-insensitive", () => {
-		const a = tokenise("Cold Coffee");
-		const b = tokenise("cold coffee");
-		expect(a).toEqual(b);
-		expect(a).toContain("cold");
-		expect(a).toContain("coffee");
-		expect(a).toContain("cold_coffee");
+describe("memory: topics match literally, no tokeniser", () => {
+	it("CJK topics are substrings; single characters are too generic and never match", () => {
+		expect(topicMatchesText("面试", "明天要去面试，有点紧张")).toBe(true);
+		expect(topicMatchesText("面试", "今天天气不错")).toBe(false);
+		// 好 appears inside 好吗/好的/爱好 — a one-character topic would match everywhere.
+		expect(topicMatchesText("好", "好吗")).toBe(false);
+		expect(topicMatchesText("好", "爱好音乐")).toBe(false);
 	});
 
-	it("segments CJK into dictionary words with particle dropping", () => {
-		// Punctuation ends a CJK run, so each side segments independently: real word boundaries
-		// (你好 | 世界), never the individual characters — the old per-character unigram bug.
-		const punct = tokenise("你好，世界");
-		expect(punct).toContain("你好");
-		expect(punct).toContain("世界");
-		expect(punct).not.toContain("你");
-		expect(punct).not.toContain("好");
-		expect(punct).not.toContain("世");
-		expect(punct).not.toContain("界");
-		// One uninterrupted run yields the same words.
-		const run = tokenise("你好世界");
-		expect(run).toContain("你好");
-		expect(run).toContain("世界");
-		expect(run).not.toContain("好世"); // sliding-bigram noise must not come back
-		// An isolated single char is a real word and survives.
-		expect(tokenise("好")).toEqual(["好"]);
-		// Particles are dropped wherever the segmenter surfaces them: 我的猫 → 我 + 猫.
-		const particles = tokenise("我的猫");
-		expect(particles).toContain("我");
-		expect(particles).toContain("猫");
-		expect(particles).not.toContain("的");
-		// The tokeniser stays deterministic on CJK input.
-		expect(tokenise("你好世界")).toEqual(tokenise("你好世界"));
+	it("latin topics are word-bounded and case-insensitive", () => {
+		expect(topicMatchesText("Work", "how is work going")).toBe(true);
+		expect(topicMatchesText("work", "the network is down")).toBe(false);
+		expect(topicMatchesText("cat", "CAT")).toBe(true);
+		expect(topicMatchesText("ab", "ablation")).toBe(false); // below the length floor
+	});
+});
+
+describe("memory: encode stores one authored memory", () => {
+	it("the whole text is the memory; re-encoding the same text reinforces it", () => {
+		const text = "they are preparing for a job interview next week";
+		let g = encode(emptyMemory(), { text, pad: { p: -0.2, a: 0.4, d: 0 }, t: 0 });
+		expect(Object.keys(g.nodes)).toHaveLength(1);
+		const key = nodeKey(text);
+		expect(g.nodes[key]).toBeDefined();
+		expect(g.nodes[key].count).toBe(1);
+		// The moment's valence is remembered as the memory's affective centroid.
+		expect(g.nodes[key].pad.p).toBe(-0.2);
+
+		g = encode(g, { text: `${text} `, pad: { p: 0.4, a: 0, d: 0 }, t: 1_000 });
+		expect(Object.keys(g.nodes)).toHaveLength(1);
+		expect(g.nodes[key].count).toBe(2);
+		expect(g.nodes[key].strength).toBeGreaterThan(0.4);
+		expect(g.nodes[key].pad.p).toBeGreaterThan(-0.2); // EMA moved toward the new valence
 	});
 
-	it("builds cross-language bigrams between latin and CJK tokens", () => {
-		const toks = tokenise("cold 你好");
-		expect(toks).toContain("cold");
-		expect(toks).toContain("你好");
-		expect(toks).toContain("cold_你好");
-	});
-
-	it("encode folds a trace into nodes and edges with the episode's valence", () => {
-		const g = encode(emptyMemory(), { text: "rainy day long walk", pad: { p: -0.6, a: 0.2, d: 0 }, t: 0 });
-		expect(g.nodes[nodeKey("rainy")]).toBeDefined();
-		expect(g.nodes[nodeKey("day")]).toBeDefined();
-		// A co-occurrence edge should exist and carry a negative weight matching the episode.
-		const e = g.edges.find(
-			(x) => (x.a.includes("rainy") && x.b.includes("day")) || (x.b.includes("rainy") && x.a.includes("day")),
-		);
-		expect(e).toBeDefined();
-		expect(e!.weight).toBeLessThan(0);
+	it("importance scales the initial strength, topics are stored capped and deduplicated", () => {
+		const g = encode(emptyMemory(), {
+			text: "core memory",
+			pad: { p: 0, a: 0, d: 0 },
+			t: 0,
+			topics: ["core", "core", "", "extra", "one", "two"],
+			importance: 1,
+		});
+		const node = g.nodes[nodeKey("core memory")];
+		expect(node.strength).toBeCloseTo(0.75, 5); // 0.25 + 0.5 * 1
+		// Deduplicated, empties dropped, capped at 3.
+		expect(node.topics).toEqual(["core", "extra", "one"]);
+		// Default importance is 0.3.
+		const plain = encode(emptyMemory(), { text: "a note", pad: { p: 0, a: 0, d: 0 }, t: 0 });
+		expect(plain.nodes[nodeKey("a note")].strength).toBeCloseTo(0.4, 5);
 	});
 });
 
 describe("memory: private thoughts", () => {
-	it("keeps private nodes out of the summary but reachable via recall", () => {
-		// A private note is an ordinary graph node — it encodes, reinforces and recalls like any
-		// other — but `summary` is the user-visible block, so its label must never render there.
+	it("keeps private memories out of the summary but reachable via recall", () => {
+		// A private note is an ordinary memory — it encodes, reinforces and recalls like any other —
+		// but `summary` is the user-visible block, so its label must never render there.
 		let g = encode(emptyMemory(), { text: "whisper", pad: { p: 0, a: 0, d: 0 }, t: 0, private: true });
 		g = encode(g, { text: "rainbow", pad: { p: 0, a: 0, d: 0 }, t: 1 });
 		expect(g.nodes[nodeKey("whisper")]).toBeDefined();
 		const s = summary(g);
 		expect(s).not.toContain("whisper");
 		expect(s).toContain("rainbow");
-		// Private means unrendered, not forgotten: recall still finds it by seed.
-		const hits = recall(g, { seeds: [nodeKey("whisper")], now: 1 });
+		// Private means unrendered, not forgotten: recall still finds it.
+		const hits = recall(g, { query: "a quiet whisper", now: 1 });
 		expect(hits.some((h) => h.label === "whisper")).toBe(true);
+	});
+});
+
+describe("memory: legacy auto-extracted fragments are dropped on load", () => {
+	it("sanitiseMemory keeps only model-authored memories (legacy private notes stay)", () => {
+		const legacyFragment = neutral("感觉:abc", 0.5, 0); // no origin: tokeniser-era node
+		const legacyPrivate: MemoryNode = { ...neutral("p", 0.5, 0), private: true };
+		const authored: MemoryNode = { ...neutral("a", 0.5, 0), origin: "model" as const };
+		const raw = {
+			version: 1,
+			maxNodes: 400,
+			nodes: { f: legacyFragment, p: legacyPrivate, a: authored },
+			episodes: [],
+			counters: { encoded: 3, consolidations: 0, pruned: 0 },
+			seed: 0,
+		};
+		const g = sanitiseMemory(raw);
+		expect(g.nodes["f"]).toBeUndefined(); // the noise this rewrite exists to remove
+		expect(g.nodes["p"]).toBeDefined(); // the model chose to keep it
+		expect(g.nodes["p"].origin).toBe("model");
+		expect(g.nodes["a"]).toBeDefined();
 	});
 });

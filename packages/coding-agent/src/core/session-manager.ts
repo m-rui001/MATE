@@ -21,6 +21,8 @@ import {
 	openSync,
 	readdirSync,
 	readSync,
+	renameSync,
+	rmSync,
 	type Stats,
 	statSync,
 	writeFileSync,
@@ -583,20 +585,49 @@ export function buildSessionContext(
 }
 
 /**
- * Compute the default session directory for a cwd.
- * Encodes cwd into a safe directory name under ~/.pi/agent/sessions/.
+ * Compute the default session directory.
+ *
+ * MATE deliberately does NOT encode the cwd into the path the way upstream pi does. A companion is
+ * one continuous life, not a per-project tool: its conversation archive lives in ONE place
+ * (~/.mate/agent/sessions/), so opening mate from any directory finds the same history. The working
+ * directory itself is untouched — each session still records where it ran, and tools operate there.
+ * Set MATE_CODING_AGENT_SESSION_DIR (or --session-dir) to get an isolated, cwd-filtered store back.
  */
-function getDefaultSessionDirPath(cwd: string, agentDir: string = getDefaultAgentDir()): string {
-	const resolvedCwd = resolvePath(cwd);
-	const resolvedAgentDir = resolvePath(agentDir);
-	const safePath = `--${resolvedCwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
-	return join(resolvedAgentDir, "sessions", safePath);
+function getDefaultSessionDirPath(agentDir: string = getDefaultAgentDir()): string {
+	return join(resolvePath(agentDir), "sessions");
 }
 
-export function getDefaultSessionDir(cwd: string, agentDir: string = getDefaultAgentDir()): string {
-	const sessionDir = getDefaultSessionDirPath(cwd, agentDir);
+/** One-time migration: pull session files up from the legacy per-cwd subdirectories. */
+function migrateLegacyProjectSessionDirs(sessionDir: string): void {
+	try {
+		for (const entry of readdirSync(sessionDir, { withFileTypes: true })) {
+			if (!entry.isDirectory() || !entry.name.startsWith("--") || !entry.name.endsWith("--")) continue;
+			const legacyDir = join(sessionDir, entry.name);
+			for (const file of readdirSync(legacyDir)) {
+				if (!file.endsWith(".jsonl")) continue;
+				try {
+					renameSync(join(legacyDir, file), join(sessionDir, file));
+				} catch {
+					// A name clash or a locked file must not abort the migration of the rest.
+				}
+			}
+			try {
+				rmSync(legacyDir, { recursive: true });
+			} catch {
+				// Left behind empty or not: harmless either way.
+			}
+		}
+	} catch {
+		// Migration is best-effort; discovery still works for whatever is in place.
+	}
+}
+
+export function getDefaultSessionDir(agentDir: string = getDefaultAgentDir()): string {
+	const sessionDir = getDefaultSessionDirPath(agentDir);
 	if (!existsSync(sessionDir)) {
 		mkdirSync(sessionDir, { recursive: true });
+	} else {
+		migrateLegacyProjectSessionDirs(sessionDir);
 	}
 	return sessionDir;
 }
@@ -1146,7 +1177,7 @@ export class SessionManager {
 	}
 
 	usesDefaultSessionDir(): boolean {
-		return this.sessionDir === getDefaultSessionDirPath(this.cwd);
+		return this.sessionDir === getDefaultSessionDirPath();
 	}
 
 	getSessionId(): string {
@@ -1753,7 +1784,7 @@ export class SessionManager {
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.pi/agent/sessions/<encoded-cwd>/).
 	 */
 	static create(cwd: string, sessionDir?: string, options?: NewSessionOptions): SessionManager {
-		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
+		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir();
 		return new SessionManager(cwd, dir, undefined, true, options);
 	}
 
@@ -1791,8 +1822,8 @@ export class SessionManager {
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.pi/agent/sessions/<encoded-cwd>/).
 	 */
 	static continueRecent(cwd: string, sessionDir?: string): SessionManager {
-		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
-		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
+		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir();
+		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath();
 		const mostRecent = findMostRecentSession(dir, filterCwd ? cwd : undefined);
 		if (mostRecent) {
 			return new SessionManager(cwd, dir, mostRecent, true);
@@ -1830,7 +1861,7 @@ export class SessionManager {
 			throw new Error(`Cannot fork: source session has no header: ${resolvedSourcePath}`);
 		}
 
-		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(resolvedTargetCwd);
+		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir();
 		if (!existsSync(dir)) {
 			mkdirSync(dir, { recursive: true });
 		}
@@ -1872,8 +1903,8 @@ export class SessionManager {
 	 * @param sessionDir Optional session directory. If omitted, uses default (~/.pi/agent/sessions/<encoded-cwd>/).
 	 */
 	static findById(cwd: string, id: string, sessionDir?: string): string | undefined {
-		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
-		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
+		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir();
+		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath();
 		const resolvedCwd = resolvePath(cwd);
 
 		try {
@@ -1903,8 +1934,8 @@ export class SessionManager {
 		onProgress?: SessionListProgress,
 		signal?: AbortSignal,
 	): Promise<SessionInfo[]> {
-		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(cwd);
-		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath(cwd);
+		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir();
+		const filterCwd = sessionDir !== undefined && dir !== getDefaultSessionDirPath();
 		const resolvedCwd = resolvePath(cwd);
 		const includeSession = (session: SessionInfo) => !filterCwd || sessionCwdMatches(session.cwd, resolvedCwd);
 		const progress: SessionListProgress | undefined = onProgress

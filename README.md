@@ -30,16 +30,28 @@ warming, where a plain vector of scores cannot.
 The machine powers off. `catchup.ts` advances the state across the gap in closed form, so the
 companion wakes having lived the interval rather than skipped it.
 
-Private thoughts enter the memory graph through a `ponder` tool, marked private: they participate
-in recall but are never rendered to the user, and the tool call itself renders nothing in the
-terminal. The old encrypted sealed tier was removed because the boundary it guarded was not real —
-the UI exposes hidden thoughts, and the model can read its own files — so secrecy-by-encryption was
-an illusion; private thoughts are just memories the user never sees rendered.
+Private thoughts enter memory through a `ponder` tool, marked private: they participate in recall
+but are never rendered to the user, and the tool call itself renders nothing in the terminal. The
+old encrypted sealed tier was removed because the boundary it guarded was not real — the UI exposes
+hidden thoughts, and the model can read its own files — so secrecy-by-encryption was an illusion;
+private thoughts are just memories the user never sees rendered.
 
-Memory is a bounded NEXUS-style graph of concept nodes weighted by co-occurrence and PAD valence.
+Memory is not written automatically. There is no tokeniser slicing your every message into concept
+fragments — that design only accumulated noise like 试试看 or 感觉. What deserves to survive is the
+model's own call, made in its own turn: the `remember` tool stores a memory it chose to keep (one
+line in its own words, tagged with a few topics such as 面试 or work), and `ponder` stores the
+private kind. Recall matches topics literally — word-bounded checks, not approximate segmentation —
+so an untagged memory may never resurface on its own; tagging is the model's responsibility.
 Forgetting follows ACT-R: strength decays with real elapsed time, recalling a memory reinforces it,
 an emotionally charged memory fades more slowly, and sleep consolidates. The full mechanics are in
 `packages/mate/src/memory.ts`.
+
+The conversation archive lives in one place: wherever you open mate, sessions are stored under
+`~/.mate/agent/sessions/` (archives from the older per-directory layout are merged in on startup).
+The working-directory mode is untouched — every session still remembers where it ran, and tools
+work there — but the companion's life is one continuous stream, not a per-project filing cabinet.
+Accordingly the pi-native commands that rewind or branch a conversation (`/tree`, `/fork`,
+`/clone`) are disabled: a continuous life cannot be rewound. `/resume` stays.
 
 The stored drives are `connection`, `curiosity`, `expression`, `growth`, and `rest` — five. `boredom`
 is no longer one of them: it is derived each tick from a recent-surprise average, topic
@@ -57,7 +69,7 @@ inbound message reaches the model with an advisory inclination drawn from the ke
 builds persistent beliefs from its experience: beliefs colour how it reads what happens next, and
 what happens next updates the beliefs.
 
-For cost, the heavy and slow-changing content (identity, character, memory-graph summary) rides the
+For cost, the heavy and slow-changing content (identity, character, memory summary) rides the
 cached system-prompt prefix and is paid once per run. Only a small volatile delta (clock, mood,
 drives, this turn's recall) rides the ephemeral `context` tail. The full design and its mapping to
 the requirements are in [COMPANION.md](COMPANION.md).
@@ -86,7 +98,7 @@ curl -fsSL https://raw.githubusercontent.com/m-rui001/MATE/main/scripts/install.
 ```
 
 Then open a new terminal and type `mate`. Manual alternative: download the archive for your
-platform from [the release page](https://github.com/m-rui001/MATE/releases/tag/v1.0.1-mate) —
+platform from [the release page](https://github.com/m-rui001/MATE/releases/tag/v1.0.2-mate) —
 `mate-windows-x64.zip` / `mate-windows-arm64.zip` (run `mate.exe`), `mate-linux-x64.tar.gz` /
 `mate-linux-arm64.tar.gz` and `mate-darwin-x64.tar.gz` / `mate-darwin-arm64.tar.gz` (run `mate/mate`
 after `tar -xzf`). On macOS, if Gatekeeper blocks it: `xattr -d com.apple.quarantine mate`.
@@ -184,15 +196,17 @@ MATE 保留了 pi 的能力（bash、MCP、自安装扩展、整个代理核心�
 
 机器关机了。`catchup.ts` 以闭式形式推进状态跨越这段间隔，所以伴侣醒来时是活过了这段时间，而不是跳过了它。
 
-私人想法通过一个 `ponder` 工具进入记忆图，并标记为 private：它们参与回忆，但永远不会渲染给用户，工具调用本身在终端里也不渲染任何内容。旧的加密密封层被移除，因为它守卫的边界并不真实——界面一键就能展开隐藏想法，模型也能读自己的文件——靠加密保密是一种幻觉；私人想法现在只是用户永远看不到被渲染出来的普通记忆。
+私人想法通过一个 `ponder` 工具进入记忆，标记为 private：它们参与回忆，但永远不会渲染给用户，工具调用本身在终端里也不渲染任何内容。旧的加密密封层被移除，因为它守卫的边界并不真实——界面一键就能展开隐藏想法，模型也能读自己的文件——靠加密保密是一种幻觉；私人想法现在只是用户永远看不到被渲染出来的普通记忆。
 
-记忆是一个有界的 NEXUS 风格概念节点图，按共现和 PAD 效价加权。遗忘遵循 ACT-R：强度随真实流逝时间衰减，回忆一条记忆会强化它，情绪强烈的记忆消退得更慢，睡眠会巩固记忆。完整机制在 `packages/mate/src/memory.ts`。
+记忆不是自动写入的。没有任何分词器把你的每句话切成概念碎片存进图谱——那个设计只会积累「试试看」「感觉」这样的噪音。值得留下什么，由模型在自己的回合里决定：`remember` 工具存一条它选择保留的记忆（一句它自己的话，附上几个主题标签，比如 `面试` 或 `work`），`ponder` 存私密的那一类。回忆按主题字面匹配（词边界检查，不是近似分词），所以一条没打标签的中文记忆可能永远不会自己浮上来——打标签是它自己的责任。遗忘遵循 ACT-R：强度随真实流逝时间衰减，回忆一条记忆会强化它，情绪强烈的记忆消退得更慢，睡眠会巩固记忆。完整机制在 `packages/mate/src/memory.ts`。
+
+对话档案也只有一个地方：无论从哪个目录打开 mate，会话都存在 `~/.mate/agent/sessions/` 下（旧版按目录分存的档案会在启动时自动并入）。工作目录模式保留——每个会话仍记得它运行在哪里，工具也在那里工作——但伴侣的人生是一段连续的流水，不是一个按项目分文件夹的档案。相应地，`/tree`、`/fork`、`/clone` 这些把对话退回某个节点或另开分支的原生命令被禁用：连续的人生不能倒带。`/resume` 保留。
 
 存储的驱力有五个：`connection`、`curiosity`、`expression`、`growth` 和 `rest`。`boredom` 不再是其中之一：它每步都从近期意外均值、话题习惯化、想法饱和度、外向性和一个空闲门（信息摄入亏空）推导出来（Schmidhuber 1991、Darling 2023、Yu et al. 2019）。缓解来自新颖而不是接触本身，所以一句平淡的 `ok` 几乎缓解不了什么。旧的 `selfPreservation` 驱力已移除。它们是动机，不是工具。它们改变模型想做什么，但不增加它能做什么。
 
-内核不再决定伴侣是否回复。pi 的 `input` 门控被移除了。每条入站消息到达模型时，附带一个从内核得出的建议性倾向（`eager`、`open`、`muted`、`withdrawn`），由模型决定回复、稍后回复，还是保持安静。一个 `look` 工具让它有理由时截屏，前面没有门控。一个 `ponder` 工具给它一条进入记忆的私人想法流，从不展示；一个信念回路从它的经历中积累持久信念：信念影响它如何解读接下来发生的事，而接下来发生的事又更新信念。
+内核不再决定伴侣是否回复。pi 的 `input` 门控被移除了。每条入站消息到达模型时，附带一个从内核得出的建议性倾向（`eager`、`open`、`muted`、`withdrawn`），由模型决定回复、稍后回复，还是保持安静。一个 `look` 工具让它有理由时截屏，前面没有门控。一个 `ponder` 工具给它一条进入记忆的私人想法流，从不展示；一个 `remember` 工具让它自己决定记住什么；一个信念回路从它的经历中积累持久信念：信念影响它如何解读接下来发生的事，而接下来发生的事又更新信念。
 
-为了控制成本，重且变化慢的内容（身份、性格、记忆图摘要）搭载缓存的系统提示前缀，每次运行只付一次费。只有一小段易变增量（时钟、心境、驱力、本回合的回忆）搭载短暂的 `context` 尾部。完整设计及其与需求的映射在 [COMPANION.md](COMPANION.md)。
+为了控制成本，重且变化慢的内容（身份、性格、记忆摘要）搭载缓存的系统提示前缀，每次运行只付一次费。只有一小段易变增量（时钟、心境、驱力、本回合的回忆）搭载短暂的 `context` 尾部。完整设计及其与需求的映射在 [COMPANION.md](COMPANION.md)。
 
 伴侣用你选的语言思考。第一次启动时它会问你要 中文 还是 English，之后随时可以用 `/language` 改；这个选择会持久保存。选了中文之后，所有进入提示词的内容都用中文书写 — 身份块、状态投影、内核自己的想法、冲动、引导 — 外加一条明确的声明：内在的声音本身就是中文的。所以它是直接用中文想，而不是想完再翻。中文伴侣记得的、感受到的、做出的决定，和英文伴侣完全一样；移动的只有标签。
 
@@ -212,7 +226,7 @@ macOS / Linux：
 curl -fsSL https://raw.githubusercontent.com/m-rui001/MATE/main/scripts/install.sh | bash
 ```
 
-然后新开一个终端，直接输入 `mate`。手动方式：到 [release 页面](https://github.com/m-rui001/MATE/releases/tag/v1.0.1-mate) 下载对应平台的压缩包——Windows 下 `mate-windows-x64.zip` / `mate-windows-arm64.zip`（解压后运行 `mate.exe`），Linux / macOS 下 `mate-linux-x64.tar.gz`、`mate-darwin-arm64.tar.gz` 等（`tar -xzf` 解压后运行 `mate/mate`）。macOS 若被 Gatekeeper 拦截：`xattr -d com.apple.quarantine mate`。配置在 `~/.mate`（可用 `MATE_CODING_AGENT_DIR` 覆盖）；首次启动会询问伴侣用什么语言思考和说话。第三方扩展如果通过 `PI_CODING_AGENT_DIR` 定位配置，会自动桥接到同一个目录；把 `~/.pi` 写死在自己默认值里的扩展仍需手动指过来。
+然后新开一个终端，直接输入 `mate`。手动方式：到 [release 页面](https://github.com/m-rui001/MATE/releases/tag/v1.0.2-mate) 下载对应平台的压缩包——Windows 下 `mate-windows-x64.zip` / `mate-windows-arm64.zip`（解压后运行 `mate.exe`），Linux / macOS 下 `mate-linux-x64.tar.gz`、`mate-darwin-arm64.tar.gz` 等（`tar -xzf` 解压后运行 `mate/mate`）。macOS 若被 Gatekeeper 拦截：`xattr -d com.apple.quarantine mate`。配置在 `~/.mate`（可用 `MATE_CODING_AGENT_DIR` 覆盖）；首次启动会询问伴侣用什么语言思考和说话。第三方扩展如果通过 `PI_CODING_AGENT_DIR` 定位配置，会自动桥接到同一个目录；把 `~/.pi` 写死在自己默认值里的扩展仍需手动指过来。
 
 **从源码构建：** 需要 Node >= 22.19。每一行都是一条独立命令（不要把注释复制进命令行，cmd.exe 不把 `#` 当注释）。
 

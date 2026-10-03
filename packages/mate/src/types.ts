@@ -107,7 +107,7 @@ export interface Drives {
  * generates the next state. All fields are bounded and every update is deterministic.
  */
 export interface Belief {
-	/** Stable key. Seed beliefs use fixed names; topic beliefs reuse the memory tokeniser's keys. */
+	/** Stable key. Seed beliefs use fixed names; topic beliefs use model-named topic strings. */
 	key: string;
 	/** Display form. */
 	label: string;
@@ -207,10 +207,17 @@ export interface MateEvent {
 	intensity: number;
 	intent: Intent;
 	/**
-	 * Text, for habituation keys, memory encoding, and SPARK belief-topic identity. Never used by the
-	 * kernel's affective math itself.
+	 * Text, for the observations ring and for SPARK topic-belief matching. Never used by the kernel's
+	 * affective math itself, and never auto-encoded into memory — memory entries are model-authored
+	 * (see memory.ts).
 	 */
 	text?: string;
+	/**
+	 * Model-named topic tags riding remember/ponder events (short subject strings like 面试 or work).
+	 * They crystallise SPARK topic beliefs; evidence for existing topic beliefs on contact events is
+	 * matched from the message text instead (see kernel.ts).
+	 */
+	topics?: string[];
 	t: number;
 }
 

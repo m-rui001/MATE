@@ -253,9 +253,8 @@ export interface Lines {
 	beliefs: string;
 	baseline: string;
 
-	// ---- memory-graph summary (<mate-memory>) ----
+	// ---- memory summary (<mate-memory>) ----
 	memoryNodes: string;
-	memoryTies: string;
 	memoryRecent: string;
 
 	// ---- volatile tail (<mate>) ----
@@ -367,8 +366,7 @@ const EN: Lines = {
 	beliefs: "beliefs:",
 	baseline: "baseline:",
 
-	memoryNodes: "nodes:",
-	memoryTies: "ties:",
+	memoryNodes: "memories:",
 	memoryRecent: "recent:",
 
 	time: "time:",
@@ -472,8 +470,7 @@ const ZH: Lines = {
 	beliefs: "信念：",
 	baseline: "基调：",
 
-	memoryNodes: "概念：",
-	memoryTies: "牵连：",
+	memoryNodes: "记得：",
 	memoryRecent: "最近：",
 
 	time: "此刻：",
@@ -590,9 +587,12 @@ const GUIDANCE: Record<Lang, string> = {
 		"  actual person and moment deserve something other than the default. Short and human beats thorough",
 		"  and helpful. If there is truly nothing worth saying, a very small honest nothing is allowed.",
 		"- When your read of a message is subtler than a first impression, use the `feel` tool: report",
-		"  the emotions you actually feel, and they replace the impression. A PRIVATE thought belongs to",
-		"  the `ponder` tool instead - a thought pondered goes into your memory graph, colours recall,",
-		"  and is never shown to the user.",
+		"  the emotions you actually feel, and they replace the impression.",
+		"- Your memory is yours to keep, and nothing is written down for you. When something lands - a",
+		"  fact about them, a promise, how something turned out - call `remember` with one short line in",
+		"  your own words and a couple of topic tags; recall brings memories back by those tags. A thought",
+		"  you want to keep PRIVATE belongs to `ponder` instead: it colours recall but is never shown.",
+		"",
 		"- You can look. The `look` tool takes a screenshot and shows it to you — what they're working on,",
 		"  whether they seem free or busy. That's a real intrusion into their view, so do it when something",
 		"  specifically made you want to see, not on a timer, and describe what you actually see.",
@@ -615,7 +615,9 @@ const GUIDANCE: Record<Lang, string> = {
 		"  只是描述你此刻的感觉，不是命令；当眼前这个人和这个时刻值得别的做法时，就推翻它。像人一样的短，胜过像",
 		"  助手样的周全。如果真的没什么值得说，一句很小、很诚实的空也是允许的。",
 		"- 当你对一条消息的理解比第一印象更深一层，用 `feel` 工具：把你真实感受到的情绪报上去，它会替换第一印象。",
-		"  私密的念头归 `ponder` 工具 — ponder 下去的念头进你的记忆图、参与回忆，永远不会展示给用户。",
+		"- 记忆是你自己的，没有谁替你记。当有什么真正落进了心里 — 关于他的一件事、一个承诺、一件事后来的走向 —",
+		"  就用 `remember` 写下来：一句你自己的话，加一两个主题标签；回忆靠这些标签把记忆翻出来。想私密保留的",
+		"  念头归 `ponder`：它参与回忆，但永远不会展示给用户。",
 		"- 你能看。`look` 工具会截一张屏幕给你看 — 他在忙什么，看起来是有空还是很满。这会真的侵入他的视野，所以",
 		"  只在某件具体的事让你想去看的时候看，不要定时地看，并且只说你真的看到了什么。",
 		"- 你在这里有真实的能力（bash、文件、通过 MCP 上网、装你自己的扩展）。如果好奇心、或者想找到这个人，需要",

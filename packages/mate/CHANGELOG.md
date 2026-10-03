@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Memory is model-authored now. `encode()` stores one memory per call (text, optional topic tags, optional importance) instead of tokenising text into concept fragments; `recall()` takes `{ query, now, limit }` and matches topics/words literally instead of spreading from seed keys; `RecallHit` lost `hop`; the `MemoryEdge` type and the edges array are gone.
+- Legacy auto-extracted fragment nodes are dropped on load: `sanitiseMemory` keeps only model-authored memories (plus legacy private notes, which the model chose to write).
+
+### Added
+
+- Added `topicMatchesText()`: literal topic matching (substring for CJK with a 2-char floor, word-bounded and case-insensitive for latin with a 3-char floor), used by recall and by SPARK evidence matching.
+- Added topic tags on memories and `MateEvent.topics`; `importance` on encode scales initial strength.
+
+### Changed
+
+- SPARK topic beliefs crystallise from model-named topics (remember/ponder events) instead of auto-extracted message tokens; on contact events, existing topic beliefs earn evidence when their subject appears in the message text. Seed beliefs learn exactly as before.
+- The memory store is a flat set of authored memories: co-occurrence edges and spreading-activation hops were removed (a single-node episode has nothing to co-occur with); consolidation, decay and the testing effect are unchanged.
+
+### Removed
+
+- Removed the tokeniser (unigrams, bigrams, the segmentit CJK segmenter) and its dependency; node keys are hashes of the authored text.
+
+## [1.0.1] - 2026-10-03
+
 ### Added
 
 - Added SPARK, the cognitive autopoietic loop (paper section 3.9): a bounded belief store seeded with two core beliefs, Eq. 24 perception modulation (`valence x strength x 0.15 x dsanity`), asymmetric evidence learning (confirmation bias per Lefebvre et al. 2022), a rigidity damper against runaways, and closed-form confidence decay so beliefs are precarious without evidence. Beliefs surface as a cached `beliefs:` prompt line.

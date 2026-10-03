@@ -18,8 +18,10 @@
  *   - It has eyes: a `look` tool lets it take a screenshot and SEE what the user is doing. Open by
  *     default per the give-it-real-access principle — the model decides when looking is warranted;
  *     nothing gates it.
- *   - It has a private mind: the `ponder` tool folds private thoughts into the memory graph, marked
- *     private — they colour recall but are never rendered to the user.
+ *   - It owns its memory: nothing is recorded automatically. The `remember` tool stores a memory the
+ *     model decided to keep (tagged with topics so it can be found again), and the `ponder` tool keeps
+ *     a private one — they colour recall but are never rendered to the user. The user's inbound words
+ *     are never auto-filed as memory before the model has even replied.
  *   - Token economy (P2+P5): the big STABLE content — identity, character, and the memory-graph summary
  *     — rides a CACHED system-prompt section (before_agent_start) and is paid for once. Only the small
  *     VOLATILE delta (clock, mood, drives, lean, recall) rides the ephemeral `context` tail, so it can
@@ -47,6 +49,7 @@ import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "../../cor
 import { createFeelTool } from "./feel-tool.ts";
 import { createLookTool } from "./look-tool.ts";
 import { createPonderTool } from "./ponder-tool.ts";
+import { createRememberTool } from "./remember-tool.ts";
 import { getRuntime } from "./runtime.ts";
 
 /**
@@ -93,6 +96,7 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 		// ---------------------------------------------------------------------
 		pi.registerTool(createFeelTool(() => rt));
 		pi.registerTool(createPonderTool(() => rt));
+		pi.registerTool(createRememberTool(() => rt));
 		pi.registerTool(createLookTool());
 
 		// ---------------------------------------------------------------------
