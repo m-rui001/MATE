@@ -186,6 +186,45 @@ with its own bash, MCP, and install capabilities. The design gives it room rathe
 The `pi.dev` contributor gates and release bots under `.github/workflows/` were removed. What
 remains (`ci.yml`, `npm-audit.yml`, and two label bots) runs against this fork's own repo.
 
+## Papers this builds on
+
+The affective model is an implementation of [Lobozov, *MATE: A Deterministic Affective Middleware
+for LLM-Based Companions with Emergent Character and Persistent Internal State* (v8, Zenodo
+20400530, CC-BY-4.0)](https://zenodo.org/record/20400530): the density-matrix order effect, the
+drive set, and the SPARK belief loop are its modules, and where this fork deliberately deviates
+(derived boredom, model-authored memory, confirmatory-direction Eq. 24) the code says so. The other
+works each decide one mechanism:
+
+- **Emotion space — Plutchik (1980), *Emotion: A Psychoevolutionary Synthesis*.** The 8 primary
+  emotions, their adjacency (the non-diagonal Hamiltonian coupling) and the named dyads all come
+  from the wheel; without the adjacency structure there is no order effect to model.
+- **Opponent process — Solomon & Corbit (1974), *An Opponent-Process Theory of Motivation*
+  (Psychological Review 81(2)).** The per-emotion B-state that bends every transition: what you
+  feel next depends on what you were already compensating for.
+- **Self-prediction — Friston (2010), *The free-energy principle: a unified brain theory?* (Nature
+  Reviews Neuroscience).** Each transition predicts its own PAD centre and measures surprise against
+  it; surprise feeds both boredom and the belief loop's learning signal.
+- **Boredom — the reason it is derived, not a stored drive.** Schmidhuber (1991), *A possibility
+  for implementing curiosity and boredom in model-building neural controllers*: boredom as
+  exhausted learning progress, "nothing new to compress". Darling (2023, Synthese): persistently
+  low prediction error under predictive processing. Gomez-Ramirez & Costa (2017): the
+  exploitation/exploration switch. Yu, Chang & Kanai (2019): a homeostatic motive over information
+  intake. The formula multiplies exactly these ingredients — predictability (surprise EMA + topic
+  habituation) × idle gate × personality — so relief comes from novelty, not from contact.
+- **Memory — Ebbinghaus (1885) and ACT-R (Anderson & Lebiere, 1998, *The Atomic Components of
+  Thought*).** Strength decays with real elapsed time and successful retrieval reinforces the trace
+  (the testing effect): what keeps being recalled persists, what never surfaces fades.
+  Tononi & Cirelli (2014), *Sleep and the price of plasticity* (Neuron): consolidation as selective
+  downscaling, which is what `consolidate()` does at every wake. Park et al. (2023), *Generative
+  Agents* (UIST): the recency/importance retrieval ingredients, expressed here as a slowed decay
+  rate for charged memories.
+- **Belief learning — Lefebvre et al. (2022).** Confirmation bias treated as a normative feature of
+  reinforced self-learning, which is why confirming evidence moves a belief's confidence twice as
+  fast as disconfirming evidence — with the dsanity damper as the counterweight.
+- **Seed beliefs — Young, Klosko & Weishaar (2003), *Schema Therapy: A Practitioner's Guide*.** The
+  birth priors ("others are trustworthy", "the world is mostly benign") are the schema-therapy triad
+  minus the self-domain, which already lives in the character traits.
+
 ## Upstream and license
 
 Everything outside `packages/mate/**` and `packages/coding-agent/src/extensions/mate/**` is upstream
@@ -297,6 +336,19 @@ MATE 本地运行，处于启动者的安全边界之内，没有权限系统，
 没有内置的外联渠道。没有电子邮件、webhook 或 cron 被接为功能。当伴侣想联系用户时，内核浮现一个冲动，模型必须用它自己的 bash、MCP 和安装能力找到办法。设计给它空间，而不是脚本。
 
 `.github/workflows/` 下的 `pi.dev` 贡献者门控和发布机器人被移除了。剩下的（`ci.yml`、`npm-audit.yml` 和两个标签机器人）针对这个分支自己的仓库运行。
+
+## 站在其上的论文
+
+情感模型是 [Lobozov, *MATE: A Deterministic Affective Middleware for LLM-Based Companions with
+Emergent Character and Persistent Internal State*（v8，Zenodo 20400530，CC-BY-4.0）](https://zenodo.org/record/20400530)的实现：密度矩阵顺序效应、驱力集合、SPARK 信念回路都是它的模块；本分支有意偏离之处（派生的无聊、模型自主撰写的记忆、式 24 的确认方向修正）都在代码里注明。其余文献各决定一个具体机制：
+
+- **情绪空间 — Plutchik（1980），*Emotion: A Psychoevolutionary Synthesis*。** 八种基本情绪、它们的相邻关系（非对角哈密顿量的耦合）以及可以复合成名字的成对情绪（dyad）全部来自普鲁奇克之轮；没有相邻结构，就没有可供建模的顺序效应。
+- **对手过程 — Solomon & Corbit（1974），*An Opponent-Process Theory of Motivation*（Psychological Review 81(2)）。** 每种情绪的 B 态会弯曲每一次转换：你下一步的感受，取决于你此刻正在补偿什么。
+- **自我预测 — Friston（2010），*The free-energy principle: a unified brain theory?*（Nature Reviews Neuroscience）。** 每次转换先预测自己的 PAD 中心，再度量意外；意外同时喂给无聊信号和信念回路的学习。
+- **无聊 — 它为什么是派生的、不是存储的驱力。** Schmidhuber（1991），*A possibility for implementing curiosity and boredom in model-building neural controllers*：无聊即学习进度耗尽，"没有新东西可压缩"。Darling（2023，Synthese）：预测误差在预测加工下持续偏低。Gomez-Ramirez & Costa（2017）：利用/探索的切换。Yu, Chang & Kanai（2019）：关于信息摄入的稳态动机。公式乘的正是这些成分 — 可预测性（意外 EMA + 话题习惯化）× 空闲门 × 性格 — 所以缓解来自新颖，而不是接触本身。
+- **记忆 — Ebbinghaus（1885）与 ACT-R（Anderson & Lebiere，1998，*The Atomic Components of Thought*）。** 强度随真实时间衰减，成功提取会加固痕迹（测试效应）：反复被想起的记忆留存，从不浮现的记忆淡去。Tononi & Cirelli（2014），*Sleep and the price of plasticity*（Neuron）：巩固即选择性降尺度，`consolidate()` 在每次醒来时做的就是这件事。Park et al.（2023），*Generative Agents*（UIST）：检索中的新近性与重要性成分，在这里表现为情绪强烈的记忆衰减更慢。
+- **信念学习 — Lefebvre et al.（2022）。** 把确认偏误当作强化自学习的规范性特征，这正是确认证据让信心移动得比否定证据快一倍的原因 — dsanity 阻尼是它的配重。
+- **种子信念 — Young, Klosko & Weishaar（2003），*Schema Therapy: A Practitioner's Guide*。** 出生先验（"他人可信""世界大体是善意的"）取自图式疗法三元组，去掉自我域 — 那部分已经在性格特质里。
 
 ## 上游和许可证
 
