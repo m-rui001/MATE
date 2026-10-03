@@ -269,6 +269,19 @@ function snapshotEventHandlers(extensions: Extension[], event: ExtensionEvent["t
 	return extensions.map((ext) => ({ ext, handlers: ext.handlers.get(event)?.slice() ?? [] }));
 }
 
+/**
+ * One-line representation of what a blocking UI prompt resolved to, so observers see the OUTCOME of
+ * a second-step selection (which option the user picked, what they typed), not merely that a prompt
+ * opened. Cancelled or empty prompts have no outcome.
+ */
+function describeUIPromptOutcome(kind: UIPromptKind, result: unknown): string | undefined {
+	if (result === null || result === undefined) return undefined;
+	if (kind === "confirm") return result === true ? "yes" : "no";
+	const text = String(result).trim();
+	if (!text) return undefined;
+	return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
 function sameMessages(left: AgentMessage[], right: AgentMessage[]): boolean {
 	return left.length === right.length && left.every((message, index) => message === right[index]);
 }
@@ -585,6 +598,7 @@ export class ExtensionRunner {
 			this.emitUIPromptEvent({ type: "ui_prompt_start", reason: "ui_prompt", kind, ...(title ? { title } : {}) });
 		}
 
+		let outcome: string | undefined;
 		const finish = () => {
 			if (--this.uiPromptDepth > 0) return;
 			this.uiPromptDepth = 0;
@@ -596,11 +610,17 @@ export class ExtensionRunner {
 				reason: "ui_prompt",
 				kind: prompt.kind,
 				...(prompt.title ? { title: prompt.title } : {}),
+				...(outcome ? { outcome } : {}),
 			});
 		};
 
 		try {
-			return run().finally(finish);
+			return run()
+				.then((result) => {
+					outcome = describeUIPromptOutcome(kind, result);
+					return result;
+				})
+				.finally(finish);
 		} catch (err) {
 			finish();
 			throw err;

@@ -286,10 +286,10 @@ export interface Lines {
 	/** The whole inclination line, so the terminator and "you choose" land naturally. */
 	inclinationLine: (lean: string, value: string, reason: string) => string;
 	recalled: string;
-	/** One-line notice that the user ran a harness command, e.g. "/tree". */
+	/** One-line notice that the user ran a harness command, arguments included, e.g. "/model foo". */
 	usedCommand: (cmd: string) => string;
-	/** One-line notice that the user switched the model the companion runs on. */
-	modelSwitched: (name: string) => string;
+	/** One-line notice of what the user picked in a command's follow-up dialog. */
+	picked: (value: string) => string;
 	lastThought: string;
 	/** "silent 42m (feels a_while)" — the gap plus how it was felt. */
 	silent: (dur: string, feels: string) => string;
@@ -398,8 +398,8 @@ const EN: Lines = {
 	inclination: "inclination:",
 	inclinationLine: (lean, value, reason) => `${lean} (${value}) — ${reason}. you choose.`,
 	recalled: "recalled:",
-	usedCommand: (cmd) => `the user used the ${cmd} command`,
-	modelSwitched: (name) => `the user switched the model to ${name}`,
+	usedCommand: (cmd) => `the user used ${cmd}`,
+	picked: (value) => `the user then picked: ${value}`,
 	lastThought: "last thought:",
 	silent: (dur, feels) => `silent ${dur} (feels ${feels})`,
 	wokeAfter: (gap) => `woke after ${gap} off`,
@@ -504,8 +504,8 @@ const ZH: Lines = {
 	inclination: "倾向：",
 	inclinationLine: (lean, value, reason) => `${lean}（${value}）：${reason}。你自己定。`,
 	recalled: "想起：",
-	usedCommand: (cmd) => `用户使用了 ${cmd} 命令`,
-	modelSwitched: (name) => `用户把模型切换成了 ${name}`,
+	usedCommand: (cmd) => `用户使用了 ${cmd}`,
+	picked: (value) => `用户随后选择了：${value}`,
 	lastThought: "上一个念头：",
 	silent: (dur, feels) => `静了 ${dur}（觉得${feels}）`,
 	wokeAfter: (gap) => `关机 ${gap} 之后才醒`,

@@ -4,8 +4,19 @@
 
 ### Added
 
+- `ui_prompt_end` now carries the prompt's `outcome` (the picked option or typed value), so observers see the second-step CHOICE of any extension command's follow-up dialog, not merely that a prompt opened.
+- Thinking blocks hidden by the setting are no longer expandable with a click: the reasoning is not user-facing content.
+
+### Changed
+
+- Command notes show typed arguments ("/model foo"), not just the command name.
+
+## [1.0.3] - 2026-10-03
+
+### Added
+
 - New `slash_command` extension event: fired for every built-in slash command (commands routed through `prompt()` already reach `input`), so extensions can observe the user's meta-actions.
-- Meta-visibility for the companion: every slash command surfaces as one generic line in the model's next state block ("the user used the /tree command"), and the stable guidance explains once what the pi harness is and that meta-tools reshape the conversation from the outside - deliberately without enumerating commands, so newly installed extensions need no wiring.
+- Meta-visibility for the companion: every slash command surfaces as one generic line in the model's next state block ("the user used /tree"), and the stable guidance explains once what the pi harness is - deliberately without enumerating commands, so newly installed extensions need no wiring.
 
 ### Changed
 

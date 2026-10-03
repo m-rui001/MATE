@@ -261,21 +261,21 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 		// ---------------------------------------------------------------------
 		pi.on("slash_command", (event) => {
 			try {
-				rt.noteCommand(event.command);
+				rt.noteCommand(event.command, event.args);
 			} catch {
 				// Noting must never disturb the command itself.
 			}
 		});
 
-		// Some commands have OUTCOMES the model must see, not just the fact of the command: switching
-		// the model is one (it changes what the companion runs on next turn). Session restores are
-		// excluded - that is not a user action, and the resumed session already knows its model.
-		pi.on("model_select", (event) => {
-			if (event.source === "restore") return;
+		// Second-step selections are the generic "outcome" of a command: every blocking UI prompt
+		// (ctx.ui.select/confirm/input/editor, any extension command's follow-up dialog) reports
+		// what the user picked via ui_prompt_end, so the model sees the CHOICE, not just the command.
+		pi.on("ui_prompt_end", (event) => {
+			if (!event.outcome) return;
 			try {
-				rt.noteModelSwitched(`${event.model.provider}/${event.model.id}`);
+				rt.notePicked(event.outcome);
 			} catch {
-				// Noting must never disturb the selection itself.
+				// Noting must never disturb the prompt itself.
 			}
 		});
 

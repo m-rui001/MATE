@@ -374,14 +374,15 @@ export class MateRuntime {
 	 * is deliberately one generic sentence: what the command MEANS is explained once in the stable
 	 * guidance, and new commands from installed extensions need no per-command wiring.
 	 */
-	noteCommand(command: string): void {
-		this.pushNote(linesFor(this.lang).usedCommand(command));
+	/** Arguments typed with the command are part of the action ("/model foo"): include them. */
+	noteCommand(command: string, args?: string): void {
+		this.pushNote(linesFor(this.lang).usedCommand(args ? `${command} ${args}` : command));
 	}
 
-	/** The user picked a different model (from the selector or a /model argument): the companion
-	 * should know what it now runs on, not merely that something happened. */
-	noteModelSwitched(name: string): void {
-		this.pushNote(linesFor(this.lang).modelSwitched(name));
+	/** The outcome of a command's second step (a picked option, a typed value): the model sees the
+	 * CHOICE, generically for every extension command, via the ui_prompt_end event. */
+	notePicked(value: string): void {
+		this.pushNote(linesFor(this.lang).picked(value));
 	}
 
 	private pushNote(note: string): void {

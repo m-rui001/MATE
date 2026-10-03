@@ -265,32 +265,33 @@ describe("memory: private thoughts", () => {
 	});
 });
 
-describe("memory: loading migrates and prunes legacy stores", () => {
-	it("re-keys v1/v2 text-embedding keys to content hashes and drops legacy fragments", () => {
-		// v1/v2 stored each memory under "text:hash" with a duplicate `key` field. The loaded
-		// identity is the hash of the text alone, so a re-encoded identical text reinforces the
-		// migrated memory instead of duplicating it.
-		const legacyFragment = neutral("感觉:abc", 0.5, 0); // no origin: tokeniser-era node
-		const legacyPrivate: MemoryNode = { ...neutral("a whisper worth keeping", 0.5, 0), private: true };
-		const authored: MemoryNode = { ...neutral("authored memory", 0.5, 0), origin: "model" as const };
+describe("memory: the loader speaks v4 only", () => {
+	it("accepts a well-formed v4 store as-is (identity is the map key)", () => {
 		const raw = {
-			version: 3,
+			version: 4,
 			maxNodes: 400,
 			nodes: {
-				"感觉:abc": legacyFragment,
-				"awhisper:xyz": legacyPrivate, // old-style key, different from hash(label)
-				"authored memory:aaa": authored,
+				abc: { ...neutral("a whisper worth keeping", 0.5, 0), private: true },
+				def: neutral("authored memory", 0.6, 5),
 			},
-			episodes: [{ t: 5, text: "an old episode", pad: { p: 0, a: 0, d: 0 } }],
-			counters: { encoded: 3, consolidations: 0, pruned: 0 },
+			counters: { encoded: 2, consolidations: 0, pruned: 0 },
 			seed: 0,
 		};
 		const g = sanitiseMemory(raw);
 		expect(g.version).toBe(4);
-		expect(Object.keys(g.nodes)).toHaveLength(2); // the noise this rewrite exists to remove is gone
-		expect(g.nodes[nodeKey("a whisper worth keeping")]).toBeDefined(); // the model chose to keep it
-		expect(g.nodes[nodeKey("authored memory")]).toBeDefined();
-		expect(Object.values(g.nodes).every((n) => n.origin === "model")).toBe(true);
-		// The legacy episode log is dropped entirely: it duplicated the labels one-for-one.
+		expect(g.nodes["abc"].label).toBe("a whisper worth keeping");
+		expect(g.nodes["def"].strength).toBe(0.6);
+		// Malformed entries are dropped individually, not fatal.
+		const partial = sanitiseMemory({ ...raw, nodes: { ...raw.nodes, bad: { strength: 1 } } });
+		expect(Object.keys(partial.nodes)).toHaveLength(2);
+	});
+
+	it("older formats are NOT migrated: any other version yields a fresh store", () => {
+		// Deliberate: no backward-compat code paths. Old files simply start fresh.
+		const v3 = sanitiseMemory({ version: 3, maxNodes: 400, nodes: { x: neutral("x", 0.5, 0) } });
+		expect(v3.version).toBe(4);
+		expect(Object.keys(v3.nodes)).toHaveLength(0);
+		const v2 = sanitiseMemory({ version: 2, maxNodes: 400, nodes: {} });
+		expect(Object.keys(v2.nodes)).toHaveLength(0);
 	});
 });

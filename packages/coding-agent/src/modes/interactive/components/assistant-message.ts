@@ -160,14 +160,21 @@ export class AssistantMessageComponent extends Container {
 								),
 							},
 						);
-				this.contentContainer.addChild(
-					new MouseRegion(thinkingComponent, (event) => {
-						if (event.type !== "click" || event.button !== "left") return undefined;
-						this.thinkingVisibilityOverrides.set(runIndex, !hidden);
-						if (this.lastMessage) this.updateContent(this.lastMessage);
-						return { handled: true };
-					}),
-				);
+				// When thinking is hidden by SETTING, the label is static: the reasoning is not
+				// user-facing content and must not be expandable with a click. Per-message
+				// click-to-collapse only exists when thinking is shown by default.
+				if (this.hideThinkingBlock) {
+					this.contentContainer.addChild(thinkingComponent);
+				} else {
+					this.contentContainer.addChild(
+						new MouseRegion(thinkingComponent, (event) => {
+							if (event.type !== "click" || event.button !== "left") return undefined;
+							this.thinkingVisibilityOverrides.set(runIndex, !hidden);
+							if (this.lastMessage) this.updateContent(this.lastMessage);
+							return { handled: true };
+						}),
+					);
+				}
 				if (hasVisibleContentAfter) {
 					this.contentContainer.addChild(new Spacer(1));
 				}

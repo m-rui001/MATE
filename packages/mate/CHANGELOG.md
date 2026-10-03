@@ -2,15 +2,17 @@
 
 ## [Unreleased]
 
-### Breaking Changes
-
-- Memory identity is the content hash alone: the store's JSON keys no longer embed the memory text (the old `text:hash` format stored every memory three times), `MemoryNode` lost its `key` field, and episodes lost their `keys` array. Loading a v1/v2 `memory.json` migrates it in place - nodes are re-keyed from their text, so identical text still reinforces the same memory.
-
 ### Changed
 
-- Store format version bumped to 4: the episode log was removed - it duplicated every memory's text one-for-one; the summary's "recent" line now derives from the nodes.
 - Human-paced emotional dynamics: mood integrates emotional shifts over ~45 minutes instead of ~6 (no message-to-message whiplash); SPARK evidence rates halved (etaConfirm 0.05, etaViolate 0.025, etaValence 0.04) with centrality tau 30 events - attitudes now shift over weeks of consistent experience, not one conversation; trust gains reduced (0.004 per message, saturating as trust rises) so an afternoon of chat moves trust a little, not to 0.75.
-- The state block carries direction: the relationship line is labelled "toward the user" (对用户的感情), and the guidance states once that the whole block is internal and must never be revealed to the user.
+- The state block carries direction: the relationship line is labelled "toward the user" (对用户的感情), and the guidance states once that the whole block is internal and must never be revealed to the user. Command notes show typed arguments and follow-up choices ("the user then picked: ...").
+- Store format version bumped to 4: the episode log was removed - it duplicated every memory's text one-for-one; the summary's "recent" line now derives from the nodes. The loader speaks v4 only: older files are not migrated and start fresh, with no compatibility code paths. The node's `origin` stamp is gone with the migration machinery.
+
+## [1.0.3] - 2026-10-03
+
+### Breaking Changes
+
+- Memory identity is the content hash alone: the store's JSON keys no longer embed the memory text (the old `text:hash` format stored every memory three times), `MemoryNode` lost its `key` field, and episodes lost their `keys` array. Loading a v1/v2 `memory.json` migrated it in place - nodes were re-keyed from their text, so identical text still reinforced the same memory.
 
 ## [1.0.2] - 2026-10-03
 

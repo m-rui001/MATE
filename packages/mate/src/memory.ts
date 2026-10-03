@@ -59,9 +59,6 @@ export interface MemoryNode {
 	/** True for the companion's own private notes (ponder): they participate in recall, reinforcement
 	 * and consolidation like any other memory, but are never rendered into the user-visible summary. */
 	private?: boolean;
-	/** Marks a node as model-authored. Anything without this stamp is legacy auto-extracted state and
-	 * is dropped on load (see sanitiseMemory) — except legacy private notes, which the model chose. */
-	origin?: "model";
 }
 
 /** A single memory. */
@@ -233,7 +230,6 @@ export function encode(g: MemoryGraph, args: EncodeArgs): MemoryGraph {
 			count: prev.count + 1,
 			t: args.t,
 			private: prev.private ?? args.private,
-			origin: "model",
 		};
 	} else {
 		node = {
@@ -245,7 +241,6 @@ export function encode(g: MemoryGraph, args: EncodeArgs): MemoryGraph {
 			t: args.t,
 			topics: topics.length ? topics : undefined,
 			private: args.private,
-			origin: "model",
 		};
 	}
 
@@ -495,46 +490,37 @@ function trim(s: string, n: number): string {
 }
 
 /**
- * Repair a loaded store, and migrate: v1/v2 keys embedded the whole memory text ("text:hash"),
- * a leftover from the fragment-node era that stored every memory three times (JSON key, node key,
- * label). Identity is now the content hash alone, so loaded nodes are re-keyed from their text;
- * the separate episode log (a pure duplicate of the labels) is dropped. Legacy auto-extracted
- * fragment nodes (no `origin`
- * stamp) are still dropped here, except legacy private notes, which the model chose to write.
- * Anything malformed falls back to empty rather than crashing boot.
+ * Repair a loaded store. This reader speaks format v4 ONLY: a file with any other version (or a
+ * malformed one) yields a fresh store — older formats are not migrated, keeping this path clean.
+ * Entries that fail validation are dropped individually; nothing here crashes boot.
  */
 export function sanitiseMemory(raw: unknown): MemoryGraph {
 	if (!raw || typeof raw !== "object") return emptyMemory();
 	const r = raw as Partial<MemoryGraph>;
-	if (typeof r.maxNodes !== "number" || r.maxNodes <= 0) return emptyMemory();
+	if (r.version !== 4 || typeof r.maxNodes !== "number" || r.maxNodes <= 0) return emptyMemory();
 	const nodes: Record<string, MemoryNode> = {};
-	if (r.nodes && typeof r.nodes === "object") {
-		for (const [k, v] of Object.entries(r.nodes)) {
-			if (!v || typeof v !== "object") continue;
-			const n = v as Partial<MemoryNode>;
-			if (typeof n.strength !== "number" || typeof n.salience !== "number") continue;
-			const isLegacy = n.origin !== "model";
-			if (isLegacy && n.private !== true) continue; // legacy auto-extracted fragment: dropped
-			const label = typeof n.label === "string" && n.label ? n.label : (k.split(":")[0] ?? k);
-			const topics = Array.isArray(n.topics)
-				? sanitiseTopics(n.topics.filter((t): t is string => typeof t === "string"))
-				: undefined;
-			nodes[nodeKey(label)] = {
-				label,
-				strength: n.strength,
-				salience: n.salience,
-				pad: {
-					p: typeof n.pad?.p === "number" ? n.pad.p : 0,
-					a: typeof n.pad?.a === "number" ? n.pad.a : 0,
-					d: typeof n.pad?.d === "number" ? n.pad.d : 0,
-				},
-				count: typeof n.count === "number" ? n.count : 1,
-				t: typeof n.t === "number" ? n.t : 0,
-				topics: topics?.length ? topics : undefined,
-				private: n.private === true,
-				origin: "model",
-			};
-		}
+	for (const [k, v] of Object.entries(r.nodes ?? {})) {
+		if (!v || typeof v !== "object") continue;
+		const n = v as Partial<MemoryNode>;
+		if (typeof n.label !== "string" || !n.label.trim()) continue;
+		if (typeof n.strength !== "number" || typeof n.salience !== "number") continue;
+		const topics = Array.isArray(n.topics)
+			? sanitiseTopics(n.topics.filter((t): t is string => typeof t === "string"))
+			: undefined;
+		nodes[k] = {
+			label: trim(n.label, MEMORY_LABEL_MAX),
+			strength: n.strength,
+			salience: n.salience,
+			pad: {
+				p: typeof n.pad?.p === "number" ? n.pad.p : 0,
+				a: typeof n.pad?.a === "number" ? n.pad.a : 0,
+				d: typeof n.pad?.d === "number" ? n.pad.d : 0,
+			},
+			count: typeof n.count === "number" ? n.count : 1,
+			t: typeof n.t === "number" ? n.t : 0,
+			topics: topics?.length ? topics : undefined,
+			private: n.private === true,
+		};
 	}
 	return {
 		version: 4,

@@ -1002,6 +1002,12 @@ export interface UIPromptEndEvent {
 	reason: "ui_prompt";
 	kind: UIPromptKind;
 	title?: string;
+	/**
+	 * One-line representation of the prompt's outcome (the picked option, the typed text,
+	 * "yes"/"no"), absent when the prompt was cancelled. Lets observers see what the user chose in
+	 * a command's second step, generically for every extension command.
+	 */
+	outcome?: string;
 }
 
 /** Fired at the start of each turn */
