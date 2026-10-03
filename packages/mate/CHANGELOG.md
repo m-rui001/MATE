@@ -8,7 +8,9 @@
 
 ### Changed
 
-- Store format version bumped to 3 (migration happens on load; no user action needed).
+- Store format version bumped to 4: the episode log was removed - it duplicated every memory's text one-for-one; the summary's "recent" line now derives from the nodes.
+- Human-paced emotional dynamics: mood integrates emotional shifts over ~45 minutes instead of ~6 (no message-to-message whiplash); SPARK evidence rates halved (etaConfirm 0.05, etaViolate 0.025, etaValence 0.04) with centrality tau 30 events - attitudes now shift over weeks of consistent experience, not one conversation; trust gains reduced (0.004 per message, saturating as trust rises) so an afternoon of chat moves trust a little, not to 0.75.
+- The state block carries direction: the relationship line is labelled "toward the user" (对用户的感情), and the guidance states once that the whole block is internal and must never be revealed to the user.
 
 ## [1.0.2] - 2026-10-03
 

@@ -10,6 +10,7 @@
 ### Changed
 
 - Re-enabled `/tree`, `/fork` and `/clone` (disabled in 1.0.2): they are the user's meta-tools, and persona consistency is carried by the memory and mood modules. The disabling notice is gone.
+- Thinking blocks are hidden from the transcript by default (`hideThinkingBlock` now defaults to true): the model's raw reasoning is not user-facing content. Re-enable it in /settings when debugging.
 
 ## [1.0.2] - 2026-10-03
 

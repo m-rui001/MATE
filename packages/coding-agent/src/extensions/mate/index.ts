@@ -267,6 +267,18 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 			}
 		});
 
+		// Some commands have OUTCOMES the model must see, not just the fact of the command: switching
+		// the model is one (it changes what the companion runs on next turn). Session restores are
+		// excluded - that is not a user action, and the resumed session already knows its model.
+		pi.on("model_select", (event) => {
+			if (event.source === "restore") return;
+			try {
+				rt.noteModelSwitched(`${event.model.provider}/${event.model.id}`);
+			} catch {
+				// Noting must never disturb the selection itself.
+			}
+		});
+
 		// ---------------------------------------------------------------------
 		// /mate: a public, user-safe view. Private thoughts are never shown.
 		// ---------------------------------------------------------------------

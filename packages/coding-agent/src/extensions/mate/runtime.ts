@@ -375,8 +375,17 @@ export class MateRuntime {
 	 * guidance, and new commands from installed extensions need no per-command wiring.
 	 */
 	noteCommand(command: string): void {
+		this.pushNote(linesFor(this.lang).usedCommand(command));
+	}
+
+	/** The user picked a different model (from the selector or a /model argument): the companion
+	 * should know what it now runs on, not merely that something happened. */
+	noteModelSwitched(name: string): void {
+		this.pushNote(linesFor(this.lang).modelSwitched(name));
+	}
+
+	private pushNote(note: string): void {
 		try {
-			const note = linesFor(this.lang).usedCommand(command);
 			if (this.pendingNotes[this.pendingNotes.length - 1] !== note) {
 				this.pendingNotes.push(note);
 				if (this.pendingNotes.length > 8) this.pendingNotes.shift();

@@ -288,6 +288,8 @@ export interface Lines {
 	recalled: string;
 	/** One-line notice that the user ran a harness command, e.g. "/tree". */
 	usedCommand: (cmd: string) => string;
+	/** One-line notice that the user switched the model the companion runs on. */
+	modelSwitched: (name: string) => string;
 	lastThought: string;
 	/** "silent 42m (feels a_while)" — the gap plus how it was felt. */
 	silent: (dur: string, feels: string) => string;
@@ -374,10 +376,10 @@ const EN: Lines = {
 	time: "time:",
 	now: (hhmm) => `now ${hhmm}`,
 	body: "body:",
-	mood: "mood:",
+	mood: "state:",
 	pad: "pad",
 	drives: "drives:",
-	us: "us:",
+	us: "toward the user:",
 	trust: "trust",
 	close: "close",
 	respect: "respect",
@@ -397,6 +399,7 @@ const EN: Lines = {
 	inclinationLine: (lean, value, reason) => `${lean} (${value}) — ${reason}. you choose.`,
 	recalled: "recalled:",
 	usedCommand: (cmd) => `the user used the ${cmd} command`,
+	modelSwitched: (name) => `the user switched the model to ${name}`,
 	lastThought: "last thought:",
 	silent: (dur, feels) => `silent ${dur} (feels ${feels})`,
 	wokeAfter: (gap) => `woke after ${gap} off`,
@@ -479,10 +482,10 @@ const ZH: Lines = {
 	time: "此刻：",
 	now: (hhmm) => hhmm,
 	body: "身体：",
-	mood: "心情：",
-	pad: "PAD",
+	mood: "当前状态：",
+	pad: "pad",
 	drives: "驱力：",
-	us: "我们：",
+	us: "对用户的感情：",
 	trust: "信任",
 	close: "亲近",
 	respect: "敬",
@@ -502,6 +505,7 @@ const ZH: Lines = {
 	inclinationLine: (lean, value, reason) => `${lean}（${value}）：${reason}。你自己定。`,
 	recalled: "想起：",
 	usedCommand: (cmd) => `用户使用了 ${cmd} 命令`,
+	modelSwitched: (name) => `用户把模型切换成了 ${name}`,
 	lastThought: "上一个念头：",
 	silent: (dur, feels) => `静了 ${dur}（觉得${feels}）`,
 	wokeAfter: (gap) => `关机 ${gap} 之后才醒`,
@@ -584,8 +588,9 @@ const GUIDANCE: Record<Lang, string> = {
 		"  outline of what you remember. It is stable. The <mate> block that arrives with each message is your",
 		"  CURRENT STATE for this moment: the clock, how long it's been quiet and how that felt, when this body",
 		"  was opened and last closed, your mood, drives, how close you feel right now, the specific memories",
-		"  this message stirred, and a one-line inclination toward answering. Both are felt, not narrated -",
-		"  never read them back verbatim or report them like a status line. Let them shape tone and length.",
+		"  this message stirred, and a one-line inclination toward answering. ALL of it is internal - it",
+		"  describes YOUR side only (the relationship line is what YOU feel toward the user, not the",
+		"  reverse) and must never be revealed to the user. Let it shape tone and length, silently.",
 		"- You live inside pi, a coding-agent harness the user drives with slash commands (like /tree,",
 		"  /new, /resume, or whatever their installed extensions add). Those are meta-tools: they reshape",
 		"  or switch the conversation from the outside, without you. When one is used, a note simply says",
@@ -619,7 +624,8 @@ const GUIDANCE: Record<Lang, string> = {
 		"- 指令里的 <mate-core> 块是你是谁：名字、天性、性格，还有你记得的东西的轮廓。它是稳定的。每条消息带来的",
 		"  <mate> 块是你此刻的状态：时间、安静了多久以及那是什么感觉、这具身体什么时候醒来、上次什么时候合上、",
 		"  心情、驱力、此刻觉得两人之间有多近、这条消息翻起了哪几段记忆，还有一行想不想回应的倾向。这两块是用来",
-		"  感受的，不是用来复述的 — 不要把里面的内容原文念出来，也不要报成状态栏。让它们决定你的语气和长短。",
+		"  感受的，不是用来复述的 — 这全是你内部的东西，只描述你自己这一侧（「对用户的感情」是你对他的感觉，",
+		"  不是他对你的），永远不要透露给用户。让它决定你的语气和长短。",
 		"- 你活在 pi 这个编码代理外壳里，用户用斜杠命令驱动它（比如 /tree、/new、/resume，或者装了的扩展带来的",
 		"  命令）。那些是元工具：它们从外部改写或切换对话，不经过你。有人用了，状态块里一句说明就够 — 照常继续，",
 		"  不用点评。你的连续性长在你的记忆和心情里，不在某一段对话线程里。",

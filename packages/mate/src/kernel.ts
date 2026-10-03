@@ -243,7 +243,9 @@ function updateRelationship(
 	const baseline = character.trustBaseline;
 	next.trust = next.trust + (baseline - next.trust) * (1 - Math.exp(-dt / (30 * 86_400_000)));
 	if (event.kind === "user_message") {
-		const delta = 0.012 * centre.p * i;
+		// Warmth earns trust slowly, and the more trust there already is, the smaller the next
+		// increment: an afternoon of chat moves it a little; weeks of consistency move it a lot.
+		const delta = 0.004 * centre.p * i * (1 - 0.5 * next.trust);
 		next.trust = clamp01(
 			delta < 0 ? Math.max(next.trust + delta, next.trust * (1 - TRUST_DROP_CAP)) : next.trust + delta,
 		);

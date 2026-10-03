@@ -1044,7 +1044,10 @@ export class SettingsManager {
 	}
 
 	getHideThinkingBlock(): boolean {
-		return this.settings.hideThinkingBlock ?? false;
+		// MATE defaults this to TRUE: the companion's raw reasoning reads its own state block and
+		// plans in there, and none of that is user-facing content. Toggle it off in /settings
+		// ("Hide thinking") when debugging.
+		return this.settings.hideThinkingBlock ?? true;
 	}
 
 	getShowCacheMissNotices(): boolean {

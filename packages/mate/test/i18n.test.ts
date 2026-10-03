@@ -101,7 +101,8 @@ describe("language invariants", () => {
 
 	it("authors the Chinese surfaces in Chinese, not English with labels swapped", () => {
 		const zh = render("zh");
-		expect(zh).toContain("心情：");
+		expect(zh).toContain("当前状态：");
+		expect(zh).toContain("对用户的感情：");
 		expect(zh).toContain("驱力：");
 		expect(zh).toContain("倾向：");
 		// No English label may leak into the Chinese projection.
@@ -160,7 +161,7 @@ describe("language invariants", () => {
 		expect(linesFor(undefined).lang).toBe("en");
 		expect(linesFor("de" as never).lang).toBe("en");
 		// Unknown keys pass through untranslated — a token cost, never a crash.
-		expect(stateContext(state, { now: NOW, lang: "de" as never })).toContain("mood:");
+		expect(stateContext(state, { now: NOW, lang: "de" as never })).toContain("state:");
 	});
 
 	it("keeps durations honest in both languages", () => {

@@ -46,8 +46,12 @@ export const DYADS: ReadonlyArray<{ name: string; a: Emotion; b: Emotion; min: n
 
 /** Ornstein-Uhlenbeck mood parameters (Eq. 1 step 5). */
 export const MOOD = {
-	/** Pull toward the emotion-derived centre. */
-	alpha: 1 / (6 * 60_000),
+	/**
+	 * Pull toward the emotion-derived centre. Human mood does NOT whiplash message to message: an
+	 * acute feeling lands in seconds, but the mood it feeds integrates over roughly an hour, so the
+	 * companion's baseline lags its flashes instead of echoing them.
+	 */
+	alpha: 1 / (45 * 60_000),
 	/** Pull toward the personality default. */
 	beta: 1 / (90 * 60_000),
 	/** Stochastic term, per sqrt(ms). */
@@ -91,15 +95,19 @@ export const SPARK = {
 	 * Asymmetric evidence learning rates (Lefebvre et al. 2022: confirmation bias during reinforced
 	 * self-learning is a normative feature of the loop, not a bug — but it must be damped, which
 	 * dsanity does). Confirming evidence moves confidence twice as fast as disconfirming evidence.
+	 * Paced on HUMAN attitude change: a belief is an opinion formed over weeks of consistent
+	 * experience, not an afternoon — a dozen warm messages should move it a little, a month should
+	 * move it a lot.
 	 */
-	etaConfirm: 0.12,
-	etaViolate: 0.06,
+	etaConfirm: 0.05,
+	etaViolate: 0.025,
 	/** How fast a belief's evaluative orientation drifts toward the evidence it keeps seeing. */
-	etaValence: 0.08,
+	etaValence: 0.04,
 	/** Confidence never leaves [floor, 1 − floor]: a belief is never certain, never impossible. */
 	confidenceFloor: 0.05,
-	/** Evidence events for centrality to reach 1 − 1/e. A one-off remark is not a belief. */
-	centralityTau: 12,
+	/** Evidence events for centrality to reach 1 − 1/e. A one-off remark is not a belief; neither is
+	 * one intense conversation — recurring subjects over days earn centrality. */
+	centralityTau: 30,
 	/** Belief store cap. Overflow drops the weakest non-seed belief (confidence × centrality). */
 	maxBeliefs: 40,
 	/** Precariousness: without evidence a belief's confidence relaxes toward the floor on this clock. */

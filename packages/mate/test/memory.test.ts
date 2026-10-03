@@ -243,10 +243,6 @@ describe("memory: encode stores one authored memory", () => {
 		expect(node.strength).toBeCloseTo(0.75, 5); // 0.25 + 0.5 * 1
 		// Deduplicated, empties dropped, capped at 3.
 		expect(node.topics).toEqual(["core", "extra", "one"]);
-		// The episode log stores the text once; it carries no key list any more.
-		expect(g.episodes).toHaveLength(1);
-		expect(g.episodes[0].text).toBe("core memory");
-		expect((g.episodes[0] as { keys?: unknown }).keys).toBeUndefined();
 		// Default importance is 0.3.
 		const plain = encode(emptyMemory(), { text: "a note", pad: { p: 0, a: 0, d: 0 }, t: 0 });
 		expect(plain.nodes[nodeKey("a note")].strength).toBeCloseTo(0.4, 5);
@@ -278,25 +274,23 @@ describe("memory: loading migrates and prunes legacy stores", () => {
 		const legacyPrivate: MemoryNode = { ...neutral("a whisper worth keeping", 0.5, 0), private: true };
 		const authored: MemoryNode = { ...neutral("authored memory", 0.5, 0), origin: "model" as const };
 		const raw = {
-			version: 2,
+			version: 3,
 			maxNodes: 400,
 			nodes: {
 				"感觉:abc": legacyFragment,
 				"awhisper:xyz": legacyPrivate, // old-style key, different from hash(label)
 				"authored memory:aaa": authored,
 			},
-			episodes: [{ t: 5, text: "an old episode", keys: ["whatever"], pad: { p: 0, a: 0, d: 0 } }],
+			episodes: [{ t: 5, text: "an old episode", pad: { p: 0, a: 0, d: 0 } }],
 			counters: { encoded: 3, consolidations: 0, pruned: 0 },
 			seed: 0,
 		};
 		const g = sanitiseMemory(raw);
-		expect(g.version).toBe(3);
+		expect(g.version).toBe(4);
 		expect(Object.keys(g.nodes)).toHaveLength(2); // the noise this rewrite exists to remove is gone
 		expect(g.nodes[nodeKey("a whisper worth keeping")]).toBeDefined(); // the model chose to keep it
 		expect(g.nodes[nodeKey("authored memory")]).toBeDefined();
 		expect(Object.values(g.nodes).every((n) => n.origin === "model")).toBe(true);
-		// Episodes survive without their keys array.
-		expect(g.episodes).toHaveLength(1);
-		expect((g.episodes[0] as { keys?: unknown }).keys).toBeUndefined();
+		// The legacy episode log is dropped entirely: it duplicated the labels one-for-one.
 	});
 });

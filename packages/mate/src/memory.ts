@@ -64,21 +64,13 @@ export interface MemoryNode {
 	origin?: "model";
 }
 
-/** Recent episode snippets, ring buffer, each capped. `private` marks one from the companion's own
- * private notes, which the summary must never render. */
-export interface MemoryEpisode {
-	t: number;
-	text: string;
-	pad: { p: number; a: number; d: number };
-	private?: boolean;
-}
+/** A single memory. */
 
 export interface MemoryGraph {
 	version: number;
 	/** Cap on total memories so the store is bounded; consolidation prunes the weakest beyond this. */
 	maxNodes: number;
 	nodes: Record<string, MemoryNode>;
-	episodes: MemoryEpisode[];
 	/** Monotonic counters for telemetry. */
 	counters: { encoded: number; consolidations: number; pruned: number };
 	/** Threaded PRNG state, reserved for future deterministic drift. */
@@ -87,7 +79,6 @@ export interface MemoryGraph {
 
 /** The memory text is stored trimmed to this length; recall summaries may trim further. */
 const MEMORY_LABEL_MAX = 160;
-const EPISODE_RING = 48;
 /** Cap on topics per memory; the tool layer enforces it too, this is the storage-side bound. */
 const MAX_TOPICS = 3;
 
@@ -189,10 +180,9 @@ function labelTerms(label: string): string[] {
 /** Fresh, empty store. */
 export function emptyMemory(maxNodes = 400): MemoryGraph {
 	return {
-		version: 3,
+		version: 4,
 		maxNodes,
 		nodes: {},
-		episodes: [],
 		counters: { encoded: 0, consolidations: 0, pruned: 0 },
 		seed: 0x2545f491,
 	};
@@ -212,8 +202,8 @@ interface EncodeArgs {
 }
 
 /**
- * Encode one authored memory. Reinforces the node if the exact same text was stored before; every
- * encoding also appends an episode snippet. Purely functional — returns a NEW store.
+ * Encode one authored memory. Reinforces the node if the exact same text was stored before.
+ * Purely functional — returns a NEW store.
  */
 export function encode(g: MemoryGraph, args: EncodeArgs): MemoryGraph {
 	const text = args.text.trim();
@@ -259,15 +249,10 @@ export function encode(g: MemoryGraph, args: EncodeArgs): MemoryGraph {
 		};
 	}
 
-	const episodes: MemoryGraph["episodes"] = [
-		...g.episodes,
-		{ t: args.t, text: trim(text, 120), pad: { ...args.pad }, private: args.private === true },
-	].slice(-EPISODE_RING);
 	return {
 		...g,
-		version: 3,
+		version: 4,
 		nodes: { ...g.nodes, [key]: node },
-		episodes,
 		counters: { ...g.counters, encoded: g.counters.encoded + 1 },
 	};
 }
@@ -425,7 +410,7 @@ export function consolidate(g: MemoryGraph, now: number): MemoryGraph {
 /**
  * A terse, STABLE rendering for the cached system-prompt prefix. Deliberately small and slow to
  * change so prompt caching holds. Emits: the top N memories by strength and one line for the most
- * recent episode. Not the same thing as `recall` — recall is per-turn and volatile; the summary is
+ * recently written memory. Not the same thing as `recall` — recall is per-turn and volatile; the summary is
  * per-forever and lives in the cacheable prefix. Private memories are excluded from the listing:
  * they still count for recall, rehearse and consolidate, but this block is user-visible, so the
  * companion's private notes never render into it.
@@ -444,8 +429,14 @@ export function summary(g: MemoryGraph, opts: { nodes?: number; maxChars?: numbe
 		.map(([, n]) => `${trim(n.label, 60)}:${n.strength.toFixed(2)}`);
 	const lines: string[] = [];
 	if (memoryLines.length) lines.push(kv(L.memoryNodes, memoryLines.join(L.sep), lang));
-	const recent = g.episodes[g.episodes.length - 1];
-	if (recent && recent.private !== true) lines.push(kv(L.memoryRecent, trim(recent.text, 90), lang));
+	// The most recently written (or reinforced) memory, taken from the nodes themselves — the
+	// store keeps no separate episode log, which would only duplicate the labels.
+	let recent: MemoryNode | undefined;
+	for (const n of Object.values(g.nodes)) {
+		if (n.private === true) continue;
+		if (!recent || n.t > recent.t) recent = n;
+	}
+	if (recent) lines.push(kv(L.memoryRecent, trim(recent.label, 90), lang));
 	if (lines.length === 0) return "";
 	const body = `<mate-memory>\n${lines.join("\n")}\n</mate-memory>`;
 	const max = opts.maxChars ?? 900;
@@ -507,7 +498,8 @@ function trim(s: string, n: number): string {
  * Repair a loaded store, and migrate: v1/v2 keys embedded the whole memory text ("text:hash"),
  * a leftover from the fragment-node era that stored every memory three times (JSON key, node key,
  * label). Identity is now the content hash alone, so loaded nodes are re-keyed from their text;
- * episodes lose their redundant `keys` array. Legacy auto-extracted fragment nodes (no `origin`
+ * the separate episode log (a pure duplicate of the labels) is dropped. Legacy auto-extracted
+ * fragment nodes (no `origin`
  * stamp) are still dropped here, except legacy private notes, which the model chose to write.
  * Anything malformed falls back to empty rather than crashing boot.
  */
@@ -544,25 +536,10 @@ export function sanitiseMemory(raw: unknown): MemoryGraph {
 			};
 		}
 	}
-	const episodes: MemoryGraph["episodes"] = Array.isArray(r.episodes)
-		? r.episodes
-				.filter((e) => e && typeof e.t === "number" && typeof e.text === "string")
-				.map((e) => ({
-					t: e.t,
-					text: e.text,
-					pad: {
-						p: typeof e.pad?.p === "number" ? e.pad.p : 0,
-						a: typeof e.pad?.a === "number" ? e.pad.a : 0,
-						d: typeof e.pad?.d === "number" ? e.pad.d : 0,
-					},
-					private: (e as { private?: unknown }).private === true,
-				}))
-		: [];
 	return {
-		version: 3,
+		version: 4,
 		maxNodes: r.maxNodes,
 		nodes,
-		episodes,
 		counters:
 			r.counters && typeof r.counters === "object"
 				? { ...emptyMemory().counters, ...r.counters }
