@@ -71,11 +71,65 @@ export const DRIVE_RISE: Record<keyof Drives, number> = {
 	expression: 1 / (3 * 3_600_000),
 	growth: 1 / (24 * 3_600_000),
 	rest: 1 / (12 * 3_600_000),
-	// Under-stimulation builds fairly quickly — it is a low-level, restless itch.
-	boredom: 1 / (4 * 3_600_000),
-	// Existential tension is a slow background hum; the sharp changes come from sleep/wake events,
-	// not from the passive dt rise, so this rate is deliberately low.
-	selfPreservation: 1 / (72 * 3_600_000),
+};
+
+/**
+ * SPARK (MATE section 3.9): the cognitive autopoietic loop.
+ *
+ * Beliefs modulate perception and perception updates beliefs. The paper's Eq. 24 biases the perceived
+ * valence of an event by `valence × strength × 0.15 × dsanity`, where strength is the geometric mean
+ * of confidence (vmPFC analog) and centrality (ACC analog), and dsanity is the runaway damper —
+ * production telemetry over 910 events showed a mean modulation of +0.000355 with zero runaways, so
+ * the small gain and the damper are load-bearing, not decorative.
+ */
+export const SPARK = {
+	/** Eq. 24 gain on the perceived-valence bias. */
+	modulation: 0.15,
+	/** dsanity = 1 − rigidity × damper, bounded to [1 − damper, 1]. Rigidity is mean belief confidence. */
+	damper: 0.8,
+	/**
+	 * Asymmetric evidence learning rates (Lefebvre et al. 2022: confirmation bias during reinforced
+	 * self-learning is a normative feature of the loop, not a bug — but it must be damped, which
+	 * dsanity does). Confirming evidence moves confidence twice as fast as disconfirming evidence.
+	 */
+	etaConfirm: 0.12,
+	etaViolate: 0.06,
+	/** How fast a belief's evaluative orientation drifts toward the evidence it keeps seeing. */
+	etaValence: 0.08,
+	/** Confidence never leaves [floor, 1 − floor]: a belief is never certain, never impossible. */
+	confidenceFloor: 0.05,
+	/** Evidence events for centrality to reach 1 − 1/e. A one-off remark is not a belief. */
+	centralityTau: 12,
+	/** Belief store cap. Overflow drops the weakest non-seed belief (confidence × centrality). */
+	maxBeliefs: 40,
+	/** Precariousness: without evidence a belief's confidence relaxes toward the floor on this clock. */
+	decayTau: 30 * 86_400_000,
+	/** Neutral evidence (|perceived valence| below this) updates nothing. */
+	evidenceDeadZone: 0.1,
+	/** Topic-belief seeds start this sure and this oriented; they must earn the rest. */
+	topicSeedConfidence: 0.2,
+};
+
+/**
+ * Boredom (derived, not a stored drive).
+ *
+ * The literature agrees boredom is not a discharging reservoir: Schmidhuber (1991) formalises it as
+ * learning progress → 0 — nothing new to compress; Darling (2023, Synthese) as prediction error
+ * persistently low under predictive processing; Gomez-Ramirez & Costa (2017) as the
+ * exploitation/exploration switch; Yu, Chang & Kanai (2019) as a homeostatic motive over information
+ * intake. The derived signal therefore multiplies a predictability term (low recent surprise, stale
+ * topics) by an idle gate (the one homeostatic ingredient, Yu et al.) and a personality modulation.
+ */
+export const BOREDOM = {
+	/** Surprise EMA time constant, ms. */
+	surpriseTau: 6 * 3_600_000,
+	/** A surprise EMA of this much counts as fully unpredictable (surprise is a PAD norm, ~[0, 2]). */
+	surpriseScale: 0.5,
+	/** Predictability = surpriseWeight × (1 − surprise norm) + topicWeight × topic saturation. */
+	surpriseWeight: 0.6,
+	topicWeight: 0.4,
+	/** Idle-gate ramp, ms: the homeostatic information-deprivation component (Yu et al. 2019). */
+	idleTau: 2 * 3_600_000,
 };
 
 /** Drive saturation decay while satisfied, 1/ms. */

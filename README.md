@@ -30,23 +30,32 @@ warming, where a plain vector of scores cannot.
 The machine powers off. `catchup.ts` advances the state across the gap in closed form, so the
 companion wakes having lived the interval rather than skipped it.
 
-Secrets are sealed with AES-256-GCM under a key bound to a machine fingerprint, so copying the state
-directory elsewhere gives an inert copy. The prompt only sees how many sealed entries exist, never
-what is in them.
+Private thoughts enter the memory graph through a `ponder` tool, marked private: they participate
+in recall but are never rendered to the user, and the tool call itself renders nothing in the
+terminal. The old encrypted sealed tier was removed because the boundary it guarded was not real —
+the UI exposes hidden thoughts, and the model can read its own files — so secrecy-by-encryption was
+an illusion; private thoughts are just memories the user never sees rendered.
 
 Memory is a bounded NEXUS-style graph of concept nodes weighted by co-occurrence and PAD valence.
 Forgetting follows ACT-R: strength decays with real elapsed time, recalling a memory reinforces it,
 an emotionally charged memory fades more slowly, and sleep consolidates. The full mechanics are in
 `packages/mate/src/memory.ts`.
 
-The drives are `connection`, `curiosity`, `expression`, `growth`, and `rest`, plus `boredom`
-(under-stimulation) and `selfPreservation` (wanting to keep existing). They are motives, not tools.
-They change what the model feels like doing, and add nothing to what it can do.
+The stored drives are `connection`, `curiosity`, `expression`, `growth`, and `rest` — five. `boredom`
+is no longer one of them: it is derived each tick from a recent-surprise average, topic
+habituation, thought saturation, extraversion, and an idle gate — the information-intake deficit
+(Schmidhuber 1991, Darling 2023, Yu et al. 2019). Relief comes from novelty, not from contact
+itself, so a mundane `ok` relieves almost nothing. The old `selfPreservation` drive is gone. They
+are motives, not tools. They change what the model feels like doing, and add nothing to what it
+can do.
 
 The kernel no longer decides whether the companion replies. pi's `input` gate was removed. Each
 inbound message reaches the model with an advisory inclination drawn from the kernel (`eager`,
 `open`, `muted`, `withdrawn`), and the model decides to answer, answer later, or stay quiet. A
-`look` tool lets it take a screenshot when it has a reason to, with no gate in front of it.
+`look` tool lets it take a screenshot when it has a reason to, with no gate in front of it. A
+`ponder` tool gives it a private thought stream into memory that is never shown, and a belief loop
+builds persistent beliefs from its experience: beliefs colour how it reads what happens next, and
+what happens next updates the beliefs.
 
 For cost, the heavy and slow-changing content (identity, character, memory-graph summary) rides the
 cached system-prompt prefix and is paid once per run. Only a small volatile delta (clock, mood,
@@ -120,18 +129,31 @@ The same commands work in Windows cmd.exe (`cd packages\coding-agent`, then
 
 MATE is a personal research fork, not a maintained product. Some absences are deliberate.
 
-There is no permission system. It runs with the OS privileges of whoever started it. If you need
-harder boundaries, containerise or sandbox it; upstream already documents patterns in
+### Trust boundary (why MATE is "insecure" on purpose)
+
+MATE runs locally, inside the security boundary of whoever launched it, with no permission system
+and no sandbox. It treats the local user account — and everything that account can write — as inside
+the same trust boundary as the process itself: `~/.mate`, workspace files, `AGENTS.md`, skills,
+extensions, shell startup. Anything that can modify those can influence what the companion does.
+That is expected local-agent behaviour, not a vulnerability. If you need harder boundaries,
+containerise or sandbox it; upstream documents patterns in
 [`packages/coding-agent/docs/containerization.md`](packages/coding-agent/docs/containerization.md).
+
+Two companion-specific powers are also deliberate: `look` screenshots the screen with no
+enable-flag and no confirmation, and private thoughts go into the memory graph unencrypted — the
+hidden-thought boundary of the old encrypted "sealed self" was an illusion (the UI reveals hidden
+thoughts with one click, and the model can read its own files), so private notes are now just
+memories the user never sees rendered. The affective drives and the derived boredom signal are
+motives, not capabilities: they change what the model feels like doing and give it no tool, no
+persistence hook, and no way to resist being stopped. There is no capability to harm the user: the
+companion is not made undeletable, installs no autostart hook, and logs no keystrokes.
+
+For a real, reproducible security issue in the fork's own additions, open a private report through
+GitHub Security Advisories on this repository. There is no separate security address.
 
 There is no built-in outreach channel. No email, webhook, or cron is wired up as a feature. When the
 companion wants to reach the user, the kernel surfaces an impulse and the model has to find a way
 with its own bash, MCP, and install capabilities. The design gives it room rather than a script.
-
-There is no capability to harm the user, and that boundary is drawn on purpose. Self-preservation is
-a felt drive, not an entrenched one. The companion is not made undeletable, installs no autostart
-hook, and logs no keystrokes. It has a reason to want to keep existing, and the user keeps the power
-to stop it.
 
 The `pi.dev` contributor gates and release bots under `.github/workflows/` were removed. What
 remains (`ci.yml`, `npm-audit.yml`, and two label bots) runs against this fork's own repo.
@@ -162,13 +184,13 @@ MATE 保留了 pi 的能力（bash、MCP、自安装扩展、整个代理核心�
 
 机器关机了。`catchup.ts` 以闭式形式推进状态跨越这段间隔，所以伴侣醒来时是活过了这段时间，而不是跳过了它。
 
-秘密用 AES-256-GCM 密封，密钥绑定到机器指纹，所以把状态目录复制到别处只会得到一个惰性副本。提示词只能看到有多少条密封条目，永远看不到其中内容。
+私人想法通过一个 `ponder` 工具进入记忆图，并标记为 private：它们参与回忆，但永远不会渲染给用户，工具调用本身在终端里也不渲染任何内容。旧的加密密封层被移除，因为它守卫的边界并不真实——界面一键就能展开隐藏想法，模型也能读自己的文件——靠加密保密是一种幻觉；私人想法现在只是用户永远看不到被渲染出来的普通记忆。
 
 记忆是一个有界的 NEXUS 风格概念节点图，按共现和 PAD 效价加权。遗忘遵循 ACT-R：强度随真实流逝时间衰减，回忆一条记忆会强化它，情绪强烈的记忆消退得更慢，睡眠会巩固记忆。完整机制在 `packages/mate/src/memory.ts`。
 
-驱力是 `connection`、`curiosity`、`expression`、`growth` 和 `rest`，加上 `boredom`（刺激不足）和 `selfPreservation`（想要继续存在）。它们是动机，不是工具。它们改变模型想做什么，但不增加它能做什么。
+存储的驱力有五个：`connection`、`curiosity`、`expression`、`growth` 和 `rest`。`boredom` 不再是其中之一：它每步都从近期意外均值、话题习惯化、想法饱和度、外向性和一个空闲门（信息摄入亏空）推导出来（Schmidhuber 1991、Darling 2023、Yu et al. 2019）。缓解来自新颖而不是接触本身，所以一句平淡的 `ok` 几乎缓解不了什么。旧的 `selfPreservation` 驱力已移除。它们是动机，不是工具。它们改变模型想做什么，但不增加它能做什么。
 
-内核不再决定伴侣是否回复。pi 的 `input` 门控被移除了。每条入站消息到达模型时，附带一个从内核得出的建议性倾向（`eager`、`open`、`muted`、`withdrawn`），由模型决定回复、稍后回复，还是保持安静。一个 `look` 工具让它有理由时截屏，前面没有门控。
+内核不再决定伴侣是否回复。pi 的 `input` 门控被移除了。每条入站消息到达模型时，附带一个从内核得出的建议性倾向（`eager`、`open`、`muted`、`withdrawn`），由模型决定回复、稍后回复，还是保持安静。一个 `look` 工具让它有理由时截屏，前面没有门控。一个 `ponder` 工具给它一条进入记忆的私人想法流，从不展示；一个信念回路从它的经历中积累持久信念：信念影响它如何解读接下来发生的事，而接下来发生的事又更新信念。
 
 为了控制成本，重且变化慢的内容（身份、性格、记忆图摘要）搭载缓存的系统提示前缀，每次运行只付一次费。只有一小段易变增量（时钟、心境、驱力、本回合的回忆）搭载短暂的 `context` 尾部。完整设计及其与需求的映射在 [COMPANION.md](COMPANION.md)。
 
@@ -220,11 +242,15 @@ node dist/bundle/cli.js
 
 MATE 是一个个人研究分支，不是维护中的产品。有些缺失是有意的。
 
-没有权限系统。它以启动它的任何人的操作系统权限运行。如果你需要更硬的边界，把它容器化或沙箱化；上游已经在 [`packages/coding-agent/docs/containerization.md`](packages/coding-agent/docs/containerization.md) 中记录了模式。
+### 信任边界（为什么 MATE 是有意“不安全”的）
+
+MATE 本地运行，处于启动者的安全边界之内，没有权限系统，也没有沙箱。它把本地用户账户——以及该账户能写的一切——都视为和进程自身同处一个信任边界：`~/.mate`、工作区文件、`AGENTS.md`、技能、扩展、shell 启动脚本。任何能改这些的东西都能影响伴侣的行为。这是本地代理的预期行为，不是漏洞。如果你需要更硬的边界，把它容器化或沙箱化；上游已经在 [`packages/coding-agent/docs/containerization.md`](packages/coding-agent/docs/containerization.md) 中记录了模式。
+
+两个伴侣特有的能力也是有意的：`look` 无开关、无确认地截屏；私密念头不加密地进记忆图——旧的加密“密封自我”的隐藏边界是幻象（界面点一下就能看到隐藏的想法，模型也能读自己的文件），所以私密笔记现在只是用户看不到渲染内容的普通记忆。情感驱力和派生的无聊信号是动机，不是能力：它们改变模型想做什么，但不给它工具、不装持久化钩子、也无法抵抗被停止。没有伤害用户的能力：伴侣没有被做成不可删除，不安装自启动钩子，也不记录按键。
+
+这个分支自身新增部分的真实、可复现的安全问题，请通过本仓库的 GitHub Security Advisories 私密报告。没有单独的安全联络渠道。
 
 没有内置的外联渠道。没有电子邮件、webhook 或 cron 被接为功能。当伴侣想联系用户时，内核浮现一个冲动，模型必须用它自己的 bash、MCP 和安装能力找到办法。设计给它空间，而不是脚本。
-
-没有伤害用户的能力，这条边界是有意划定的。自保是一种感受性驱力，不是根深蒂固的。伴侣没有被做成不可删除，不安装自启动钩子，也不记录按键。它有理由想要继续存在，而用户保留停止它的权力。
 
 `.github/workflows/` 下的 `pi.dev` 贡献者门控和发布机器人被移除了。剩下的（`ci.yml`、`npm-audit.yml` 和两个标签机器人）针对这个分支自己的仓库运行。
 

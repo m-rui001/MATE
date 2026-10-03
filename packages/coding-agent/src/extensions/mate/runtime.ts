@@ -8,7 +8,8 @@
  *   - Appraisal -> transition -> persist, once per inbound user message. The kernel is a pure function;
  *     this module is the impure shell that feeds it real events and saves the result atomically. Each
  *     inbound message is also folded into the associative memory graph (P4), which grounds later thinking.
- *   - The reply lean. Per P1 ("减少内置模式"), the kernel no longer gates replies. `replyInclination`
+ *   - The reply lean. Per the agency principle (P1: fewer built-in modes), the kernel no longer
+ *     gates replies. `replyInclination`
  *     returns an ADVISORY signal that the model reads and may overrule; the model, not this code,
  *     decides whether to answer, answer briefly, or let it sit. The `context` projection surfaces the
  *     lean so it is felt, not enforced.
@@ -56,7 +57,6 @@ import {
 	replyInclination,
 	save,
 	saveLang,
-	seal,
 	sessionSummary,
 	stableContext,
 	stateContext,
@@ -101,7 +101,7 @@ export class MateRuntime {
 	 * The render language for this companion's inner-life surfaces. Resolved once at boot from the
 	 * persisted choice and flipped live by setLanguage (the /language command). It only ever changes
 	 * LABELS; the affective numbers and decisions are language-independent, so switching languages
-	 * mid-life does not disturb the state, the memory graph, or the sealed self.
+	 * mid-life does not disturb the state or the memory graph.
 	 */
 	private lang: Lang;
 	private onError: (err: unknown) => void;
@@ -139,12 +139,9 @@ export class MateRuntime {
 			this.onError(err);
 			this.persisted = {
 				state: birth({ name: opts.name }),
-				sealed: { version: 1, entries: [] },
 				memory: emptyMemory(),
 				sessions: emptySessions(),
-				key: Buffer.alloc(32),
 				dir: this.dir,
-				foreign: false,
 			};
 		}
 	}
@@ -183,8 +180,8 @@ export class MateRuntime {
 	 * survives a power-off, and applied to the in-process state immediately so the next turn's
 	 * projections, thoughts and impulses are authored in the new language. Because the language lives
 	 * in the STABLE prefix too, the next before_agent_start rebuilds that section — the prompt cache
-	 * takes one miss on the switch, then holds again. We do not touch state, memory, or the sealed
-	 * self: only labels move.
+	 * takes one miss on the switch, then holds again. We do not touch state or memory: only labels
+	 * move.
 	 */
 	setLanguage(lang: Lang): void {
 		this.lang = lang;
@@ -207,11 +204,6 @@ export class MateRuntime {
 			this.onError(err);
 			return "";
 		}
-	}
-
-	/** Whether this state dir was born on another machine (sealed self is inert). */
-	get foreign(): boolean {
-		return this.persisted.foreign;
 	}
 
 	// ---------------------------------------------------------------------------
@@ -277,9 +269,8 @@ export class MateRuntime {
 
 	/**
 	 * This body is closing (session_shutdown). Seal the open mark so the log records WHEN it stopped —
-	 * the requirement that the companion knows when it was opened and when it was put down. The last
-	 * self_observation advances the clock one final time so the next wake's catch-up measures the true
-	 * offline span from the moment of closing, not from the last message.
+	 * the requirement that the companion knows when it was opened and when it was put down. The next
+	 * wake's catch-up measures the offline span from this close, not from the last message.
 	 */
 	sleep(): void {
 		try {
@@ -390,19 +381,14 @@ export class MateRuntime {
 	 * companion does not double-count the message's emotional impact or advance the clock twice. The
 	 * model's reading overwrites the heuristic first impression.
 	 */
-	refine(activations: Partial<EmotionVector>, intensity: number, intent: Intent, note?: string): void {
+	refine(activations: Partial<EmotionVector>, intensity: number, intent: Intent): void {
 		try {
 			const base = this.preEventState ?? this.state;
 			const t = this.lastEventT || Date.now();
-			const r = transition(
-				base,
-				{ kind: "user_message", activations, intensity, intent, text: note, t },
-				t - base.t,
-			);
+			const r = transition(base, { kind: "user_message", activations, intensity, intent, t }, t - base.t);
 			this.persisted = { ...this.persisted, state: r.state };
-			// The refine re-reads affect and may add a sealed note; it does not change any reply choice
-			// (there is no gate — the model already owns that).
-			if (note?.trim()) this.sealJournal(note);
+			// The refine re-reads affect; it does not change any reply choice (there is no gate — the
+			// model already owns that).
 			this.persistSafe();
 		} catch (err) {
 			this.onError(err);
@@ -413,7 +399,7 @@ export class MateRuntime {
 	 * opens an "unanswered overture" streak — reset the next time the user actually replies. With the
 	 * inbound gate removed (P1), unanswered now counts only our OWN proactive messages left hanging,
 	 * which is exactly what preSendReview uses to keep the companion from chasing silence forever. */
-	noteProactiveSent(thought?: Thought): void {
+	noteProactiveSent(): void {
 		try {
 			this.applyEvent({ kind: "proactive", activations: {}, intensity: 0.3, intent: "chat", t: Date.now() });
 			this.persisted = {
@@ -423,33 +409,32 @@ export class MateRuntime {
 					relationship: { ...this.state.relationship, unanswered: this.state.relationship.unanswered + 1 },
 				},
 			};
-			if (thought) this.sealEntry("journal", `reached out: ${thought.text}`, thought.topic);
 			this.persistSafe();
 		} catch (err) {
 			this.onError(err);
 		}
 	}
 
-	/**
-	 * Record a private self-observation the model wrote (a bare `note` with no emotion vector).
-	 *
-	 * The plaintext goes ONLY to the sealed journal - never into the state's observations ring. That
-	 * ring lives unencrypted in state.json and is echoed into the prompt as "last thought", so routing
-	 * a note the feel-tool promised to seal through it would leak the secret to disk and to the user.
-	 * The self_observation event still runs (advancing the clock and nudging affect at low intensity),
-	 * but WITHOUT event.text, so nothing plaintext is persisted by the kernel.
-	 */
-	observe(text: string): void {
+	/** Record a private thought the model wrote via the `ponder` tool. The kernel still advances with a
+	 * low-intensity self_observation event — but with NO event.text, so the plaintext never enters the
+	 * observations ring (that ring is echoed into the prompt as "last thought"). The thought itself is
+	 * folded into the memory graph, marked private: it colours recall like any memory but is excluded
+	 * from the user-visible summary (see memory.ts). */
+	ponder(text: string, intensity = 0.3): void {
 		try {
+			const now = Date.now();
 			this.applyEvent({
 				kind: "self_observation",
 				activations: {},
-				intensity: 0.1,
+				intensity: 0.1 + 0.2 * intensity,
 				intent: "chat",
-				// Deliberately no `text`: keeps the note out of the plaintext observations ring.
-				t: Date.now(),
+				t: now,
 			});
-			this.sealJournal(text);
+			this.persisted = {
+				...this.persisted,
+				memory: encode(this.persisted.memory, { text, pad: this.state.mood, t: now, private: true }),
+			};
+			this.persistSafe();
 		} catch (err) {
 			this.onError(err);
 		}
@@ -495,17 +480,15 @@ export class MateRuntime {
 			});
 			// Surface discovered channels so the companion remembers what it set up for itself.
 			const channels = this.discoveredChannels.length ? L.channelsYouSet(this.discoveredChannels.join(L.sep)) : "";
-			const sealedCount = this.persisted.sealed.entries.length;
-			const secrets = sealedCount ? L.privateNotes(sealedCount) : "";
-			const foreign = this.persisted.foreign ? L.foreignBody : "";
-			return `${body}${channels}${secrets}${foreign}`;
+			return `${body}${channels}`;
 		} catch (err) {
 			this.onError(err);
 			return "";
 		}
 	}
 
-	/** Public, user-safe view of the state (for the /mate status command). Never includes sealed data. */
+	/** Public, user-safe view of the state (for the /mate status command). Private thoughts live in
+	 * the memory graph and are excluded from the user-visible summary (see memory.ts). */
 	publicSnapshot(): Record<string, unknown> {
 		try {
 			return publicView(this.state);
@@ -516,14 +499,28 @@ export class MateRuntime {
 	}
 
 	/**
-	 * Record that the model discovered a reach-out channel (email, webhook, ...) on its own. The full
-	 * text is encrypted; the plaintext hint is generic, because a channel the companion found for
-	 * itself is exactly the kind of thing the user should not be able to read straight off disk.
+	 * Record that the model discovered a reach-out channel (email, webhook, ...) on its own. The fact
+	 * surfaces in the context block for this process AND is folded into the memory graph as a private
+	 * memory, so it survives a restart: recall can bring "I can reach them via email" back after the
+	 * companion wakes up, the same way any other memory persists. Nothing here takes any action.
 	 */
 	addDiscoveredChannel(name: string): void {
-		if (!this.discoveredChannels.includes(name)) {
-			this.discoveredChannels.push(name);
-			this.sealEntry("note_on_user", `I can reach them via ${name}`, "a way to reach out");
+		if (this.discoveredChannels.includes(name)) return;
+		this.discoveredChannels.push(name);
+		try {
+			const now = Date.now();
+			this.persisted = {
+				...this.persisted,
+				memory: encode(this.persisted.memory, {
+					text: `I can reach them via ${name}`,
+					pad: this.state.mood,
+					t: now,
+					private: true,
+				}),
+			};
+			this.persistSafe();
+		} catch (err) {
+			this.onError(err);
 		}
 	}
 
@@ -561,8 +558,8 @@ export class MateRuntime {
 		return tick(this.state, now, checks, this.persisted.memory, this.lang);
 	}
 
-	/** How many proactive messages in the last hour. We track this in-process; the counter survives in
-	 * the sealed journal as a coarse fallback, but in-process is enough for the spam budget. */
+	/** How many proactive messages in the last hour. Tracked in-process only; that is enough for
+	 * the spam budget. */
 	private proactiveTimestamps: number[] = [];
 	private recentProactiveCount(now: number): number {
 		this.proactiveTimestamps = this.proactiveTimestamps.filter((t) => now - t < 3_600_000);
@@ -578,30 +575,6 @@ export class MateRuntime {
 				...this.persisted,
 				state: { ...this.state, relationship: { ...this.state.relationship, unanswered: 0 } },
 			};
-		}
-	}
-
-	/**
-	 * Seal a private journal note. The `hint` is stored in PLAINTEXT (see secret.ts) precisely so the
-	 * companion can allude to having a secret without revealing it - so it must NEVER be derived from
-	 * the note's content. A generic label lets it say "I keep a private note" while the actual text
-	 * stays encrypted. Auto-deriving the hint from the plaintext would leak the secret to anyone who
-	 * `cat`s the state dir, which is exactly the threat the sealed tier exists to stop.
-	 */
-	private sealJournal(text: string): void {
-		this.sealEntry("journal", text, "a private note");
-	}
-
-	private sealEntry(kind: Parameters<typeof seal>[2], text: string, hint: string): void {
-		try {
-			if (!this.persisted.key || this.persisted.key.length === 0) return;
-			this.persisted = {
-				...this.persisted,
-				sealed: seal(this.persisted.sealed, this.persisted.key, kind, text, hint),
-			};
-			this.persistSafe();
-		} catch (err) {
-			this.onError(err);
 		}
 	}
 

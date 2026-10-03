@@ -31,6 +31,7 @@
 				"./packages/durable/src/*"
 			],
 			"@earendil-works/pi-agent-core": ["./packages/agent/src/index.ts"],
+			"@earendil-works/pi-mate": ["./packages/mate/src/index.ts"],
 			"@earendil-works/pi-coding-agent": ["./packages/coding-agent/src/index.ts"],
 			"@earendil-works/pi-coding-agent/experimental/plugin": [
 				"./packages/coding-agent/src/experimental/plugin.ts"

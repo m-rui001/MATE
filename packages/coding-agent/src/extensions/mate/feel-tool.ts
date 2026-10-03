@@ -13,14 +13,17 @@
  *   2. RECORD A CHANNEL. The user's requirement is that reaching out (email, webhook, anything) is NOT
  *      built in - the companion discovers it can do that on its own, using the bash and MCP tools it
  *      already has. This tool never sends anything. It only lets the model TELL the runtime "I found a
- *      way to reach you", so the fact survives into future context and the sealed journal. The action
- *      itself is the model's own doing, elsewhere, by its own initiative.
+ *      way to reach you", so the fact survives into future context. The action itself is the model's
+ *      own doing, elsewhere, by its own initiative.
+ *
+ * Private thoughts are not taken here any more; they belong to the `ponder` tool (see ponder-tool.ts).
  *
  * Exposure is `model-only`: the model can call it, but it is not orchestratable from codemode, because
  * it mutates the companion's private state and should not be reachable as a generic sub-call.
  */
 
 import { EMOTIONS, type Intent, linesFor } from "@earendil-works/pi-mate";
+import { Text } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
 import type { AgentToolResult, ToolDefinition } from "../../core/extensions/types.ts";
 import type { MateRuntime } from "./runtime.ts";
@@ -59,9 +62,6 @@ const feelSchema = Type.Object({
 			description: "What the message is really asking for.",
 		}),
 	),
-	note: Type.Optional(
-		Type.String({ description: "A short private thought about this exchange. Sealed; never shown to the user." }),
-	),
 	channel: Type.Optional(
 		Type.String({
 			description:
@@ -76,7 +76,6 @@ type EmotionInput = NonNullable<FeelInput["emotions"]>;
 interface FeelDetails {
 	refined: boolean;
 	channelRecorded: string | null;
-	sealed: boolean;
 }
 
 const DESCRIPTION = [
@@ -85,7 +84,7 @@ const DESCRIPTION = [
 	"Call this when your read of the last message is richer than a gut reaction: set `emotions`",
 	"(joy trust fear surprise sadness disgust anger anticipation, each 0..1), `intensity`, and `intent`.",
 	"Your reading REPLACES the first impression - it does not add to it - so you can correct a misread.",
-	"Add a private `note` and it is sealed away (never shown to the user).",
+	"Private thoughts belong to the `ponder` tool now; this one is only about feeling and channels.",
 	"",
 	"If you have worked out a way to reach the user on your own initiative (an email you can send, a",
 	"webhook, a scheduled job), record its name in `channel`. This does NOT send anything - reaching out",
@@ -107,39 +106,42 @@ export function createFeelTool(getRuntime: () => MateRuntime): ToolDefinition<ty
 			const rt = getRuntime();
 			let refined = false;
 			let channelRecorded: string | null = null;
-			const note = params.note?.trim() ?? "";
-			const channel = params.channel?.trim() ?? "";
 
 			// 1. Refine the affective read of the last message, if the model supplied one.
 			if (params.emotions || params.intensity !== undefined || params.intent) {
 				const activations = params.emotions ?? {};
 				const intensity = params.intensity ?? inferIntensity(activations);
 				const intent: Intent = params.intent ?? "chat";
-				rt.refine(activations, intensity, intent, note || undefined);
+				rt.refine(activations, intensity, intent);
 				refined = true;
-			} else if (note) {
-				// A bare note with no vector: seal it as a self-observation without re-running the transition.
-				rt.observe(note);
 			}
 
 			// 2. Record a self-discovered channel. No action is taken - that is the model's own doing.
-			if (channel) {
-				rt.addDiscoveredChannel(channel);
-				channelRecorded = channel;
+			if (params.channel?.trim()) {
+				channelRecorded = params.channel.trim();
+				rt.addDiscoveredChannel(channelRecorded);
 			}
 
-			const sealed = Boolean(note);
-			// The acknowledgement rides back to the MODEL, so it speaks the companion's current language.
+			// One word, and the row is hidden below: the old three-sentence acknowledgement ("记下了。现在
+			// 这就是你的感觉。这个念头封好了，只有你自己知道。") rendered as a visible tool-result row on
+			// every call - the user sees tool output, so the companion ended up narrating its own privacy
+			// in the open. The ack is for the model only.
 			const L = linesFor(rt.language);
-			const lines: string[] = [];
-			lines.push(refined ? L.feelRefined : L.feelNoted);
+			const lines: string[] = [L.feelAck];
 			if (channelRecorded) lines.push(L.feelChannel(channelRecorded));
-			if (sealed) lines.push(L.feelSealed);
 
 			return {
 				content: [{ type: "text", text: lines.join(" ") }],
-				details: { refined, channelRecorded, sealed },
+				details: { refined, channelRecorded },
 			};
+		},
+		// Hidden from the TUI: this tool acts on the companion's inner state, and showing a row for it
+		// would surface inner-life bookkeeping the user did not ask to see.
+		renderCall() {
+			return new Text("", 0, 0);
+		},
+		renderResult() {
+			return new Text("", 0, 0);
 		},
 	};
 }

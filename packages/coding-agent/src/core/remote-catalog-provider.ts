@@ -46,7 +46,10 @@ function parseCatalog(providerId: string, value: unknown): AnyModel[] {
 	return entries
 		.filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null && "id" in entry)
 		.filter(isSupportedModelType)
-		.map(({ input, ...rest }) => ({ ...rest, input: Array.isArray(input) ? input : ["text"], provider: providerId }) as AnyModel);
+		.map(
+			({ input, ...rest }) =>
+				({ ...rest, input: Array.isArray(input) ? input : ["text"], provider: providerId }) as AnyModel,
+		);
 }
 
 function remoteModels(entry: ModelsStoreEntry | undefined, localGeneratedAt: number | undefined): readonly AnyModel[] {

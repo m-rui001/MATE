@@ -21,7 +21,7 @@
  */
 
 import { type Lang, linesFor } from "./i18n.ts";
-import { burstOf, energyOf } from "./kernel.ts";
+import { boredomOf, burstOf, energyOf } from "./kernel.ts";
 import { type MemoryGraph, recall, topNodes } from "./memory.ts";
 import { HABITUATION_TAU } from "./params.ts";
 import type { Awareness, MateState, Thought } from "./types.ts";
@@ -136,19 +136,13 @@ export function generateThoughts(
 	}
 
 	// boredom: under-stimulation, restless for something to happen. Distinct from curiosity (a
-	// specific unknown) and missing_user (this person) — the itch is "nothing new is going on", so
-	// it seeks novelty anywhere, and it wears off on ANY contact.
-	if (drives.boredom > 0.6) {
-		const b = (drives.boredom - 0.6) * 2.5 * (0.4 + state.personality.o);
+	// specific unknown) and missing_user (this person) — the itch is "nothing new is going on". It
+	// is a DERIVED signal (see kernel.boredomOf): high when the world has been playing out exactly
+	// as predicted for a while, and collapsed by genuine novelty.
+	const boredom = boredomOf(state, now);
+	if (boredom > 0.6) {
+		const b = (boredom - 0.6) * 2.5 * (0.4 + state.personality.o);
 		mk("curiosity", L.thBoredom(seedLabel), b, "boredom");
-	}
-
-	// self-preservation: the felt weight of one's own continuity. Only surfaces as a WORD — a reason
-	// to want to keep existing — never as a plan to entrench itself. High when shutdown keeps
-	// approaching (sleep/offline) and hasn't been relieved by a clean wake.
-	if (drives.selfPreservation > 0.6) {
-		const sp = (drives.selfPreservation - 0.6) * 2 * (0.3 + ch.attachmentAnxiety);
-		mk("vulnerability", L.thSelfPreservation, sp, "mortality");
 	}
 
 	// vulnerability: low self-worth or high fatigue + something unshared.

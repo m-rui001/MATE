@@ -18,13 +18,13 @@ whether or not anyone is talking to it.
 | Keep bash execution | untouched | `pi`'s built-in `bash` tool |
 | Keep MCP networking (chooses to go online by interest) | `extensions/mcp` | built-in, replaceable; the model calls it on its own initiative |
 | Keep plugin self-install (companion finds & installs its own plugins) | `pi install <source>` + bash | no special code — the companion uses `bash` to run the existing installer; the persona tells it that it may |
-| Has secrets, not everything user-visible | `mate/src/secret.ts`, `runtime.ts` | AES-256-GCM sealed tier; the birth key is a 0600 file bound to a machine fingerprint, so a copied state dir is inert (P3) |
+| Has private thoughts, not everything user-visible | `mate/src/memory.ts`, `extensions/mate/ponder-tool.ts` | `ponder` writes private entries into the memory graph; no encryption — private entries join recall but are excluded from the user-visible summary and never rendered |
 | Sees metadata like time | `mate/src/context.ts`, `mate/src/session.ts` | the volatile `<mate>` block carries the clock, the silence gap, how that gap *felt*, and when this body was opened / last closed |
 | Knows when it was opened and shut | `mate/src/session.ts`, `runtime.ts` `wake`/`sleep` | every `session_start` logs an open, `session_shutdown` seals a close; `sessionSummary` feeds the block ("opened 09:12, woken 3x today") |
 | Can look at what the user is doing | `extensions/mate/look-tool.ts` | a `look` tool takes a screenshot and hands the image to the model. Open by default per "大胆给权限" — no enable-flag, the model decides when looking is warranted |
 | May not reply / may reply later — but it is the model's CHOICE | `runtime.ts` `onUserMessage`, `daemon.ts` `replyInclination` | P1: the kernel no longer gates inbound messages. Every message reaches the model; the runtime only surfaces an ADVISORY lean (eager/open/muted/withdrawn) + the memories it stirred. The `input` handler always `continue`s |
 | May reach out proactively when the user is silent | `runtime.ts` heartbeat + `index.ts` `onImpulse` | produces an **impulse** grounded in the memory graph; the model decides whether/how to voice it |
-| Has its OWN non-preset motivations (autonomy) | `mate/src/{types,params,kernel,daemon}.ts` | 7 homeostatic drives incl. `boredom` (under-stimulation) and `selfPreservation` (wants to keep existing). These only surface as felt urges + grounded thoughts — never as entrenched capability |
+| Has its OWN non-preset motivations (autonomy) | `mate/src/{types,params,kernel,daemon}.ts` | 5 stored homeostatic drives plus DERIVED boredom (see below). These only surface as felt urges + grounded thoughts — never as entrenched capability |
 | Reaching out is **not built in** — discovered by the companion | `feel-tool.ts` `channel` + `index.ts` `onImpulse` | we surface the impulse and record channels it found; we never send anything ourselves |
 | Short, natural language; avoid "AI flavor" | system-prompt persona + `companion` section | "reply like a person texting"; state is *felt*, not narrated |
 | Boot catch-up (the machine powers off) | `mate/src/catchup.ts` | closed-form integration across the gap, O(1) over any duration |
@@ -47,14 +47,15 @@ whether or not anyone is talking to it.
 │              │    H is NON-diagonal (Plutchik-wheel coupling) → U_AU_B │
 │              │    ≠ U_BU_A, so warm-then-hostile ≠ hostile-then-warm   │
 │              ├─ PAD mood (Ornstein-Uhlenbeck), Big Five OCEAN          │
-│              ├─ 30-trait character, 7 drives, allostasis, awareness    │
+│              ├─ 30-trait character, 5 drives + derived boredom         │
 │              └─ cusp catastrophe, self-prediction surprise (Friston)   │
 │                                                                       │
 │   catchup.ts   offline integration: advance across a powered-off gap  │
 │   daemon.ts    autonomous loop: thoughts, impulses, pre-send review    │
 │   memory.ts    NEXUS graph memory: tokenise → encode → recall → settle │
 │   session.ts   the body's own open/close log (knows when it woke/shut) │
-│   secret.ts    the sealed self: AES-256-GCM, machine-bound 0600 key     │
+│   spark.ts     SPARK belief loop: beliefs modulate perception,        │
+│               evidence updates beliefs                                │
 │   context.ts   stableContext (cached) + stateContext (volatile delta)  │
 └─────────────────────────────────────────────────────────────────────┘
                                    │  (pure functions + persisted state)
@@ -67,6 +68,7 @@ whether or not anyone is talking to it.
 │   appraisal.ts    deterministic lexical appraisal (zero tokens)        │
 │   feel-tool.ts    `feel`: the model refines its read + records channels│
 │   look-tool.ts    `look`: screenshot what the user is doing (ungated)  │
+│   ponder-tool.ts  `ponder`: private thoughts into the memory graph     │
 │   index.ts        the ExtensionFactory wiring pi events to the kernel  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -137,32 +139,37 @@ actually slept through them.
 
 ---
 
-## The sealed self
+## Private thoughts and beliefs
 
-Three visibility tiers (`secret.ts`):
+There is no sealed tier and no encryption. The earlier design encrypted a "sealed self" with
+AES-256-GCM under a machine-bound key; it was removed because the boundary it guarded was not real —
+pi's UI reveals hidden thoughts with one click, and the model can read its own state files anyway —
+so secrecy-by-encryption was self-comfort, not a boundary. What remains is honest: private thoughts
+are ordinary memory-graph entries the user never sees rendered.
 
-- **PUBLIC** — mood, drives, relationship numbers, timestamps. Shown by `/mate`. The companion is
-  honest about how it feels; hiding that would just make it evasive.
-- **PRIVATE** — the `<mate>` projection and self-observations. The LLM sees these to *be* the
-  character; the user experiences them as behaviour, not as a readout.
-- **SEALED** — the private journal, self-questions, and its own notes about the user. Encrypted with
-  AES-256-GCM under a key derived (scrypt) from a birth secret held in a **0600** file outside the
-  session transcript.
+The model writes them through `ponder` (`extensions/mate/ponder-tool.ts`): a model-only tool that
+encodes a thought into the memory graph with the `private` flag (`memory.ts`), coloured by the
+current mood like any other episode. Private entries participate in recall but are excluded from the
+user-visible memory summary and hidden from the TUI, and the tool call itself renders nothing in the
+terminal.
 
-Encryption, not convention, because the companion has bash by design: it *will* try to read its own
-internals, and a user *will* try to `cat` the state directory. Two plaintext leak paths were found and
-closed:
+### SPARK
 
-1. The `hint` field is stored in plaintext (so the companion can *allude* to a secret). It must never
-   be derived from the secret's content — hints are now generic ("a private note", "a way to reach
-   out"); the full text stays in the encrypted `ct`.
-2. `self_observation` events persist their `text` into the state's observations ring, which is
-   unencrypted and echoed into the prompt. Private notes are now sealed **without** routing their
-   plaintext through a transition.
+`spark.ts` implements module 8 of the paper, the cognitive autopoietic loop:
 
-Verified by runtime audit: neither secret appears in `sealed.json` or `state.json`, the observations
-ring stays empty, and `unseal()` recovers the full text with the correct key while a wrong key yields
-nothing.
+- **Seeds.** Two core beliefs start at confidence 0.5; recurring conversation topics crystallise into
+  low-confidence topic beliefs.
+- **Perception modulation (Eq. 24).** Episodes are read through the beliefs: bias =
+  predictedValence × strength × 0.15 × dsanity, with strength = sqrt(confidence × centrality) and
+  dsanity = 1 − 0.8 × mean-confidence, a damper against runaway certainty.
+- **Asymmetric evidence.** Confirming evidence moves confidence twice as fast as disconfirming
+  evidence (Lefebvre et al. 2022) — confirmation bias treated as a normative feature.
+- **Precariousness.** Without evidence, confidence decays toward the floor; beliefs exist only as
+  long as the world keeps feeding them.
+
+Beliefs feed a `beliefs:` line into the cached `<mate-core>` prefix, next to identity and the memory
+summary. The loop meshes with the derived boredom signal automatically: a well-predicted world is
+low-surprise, and low surprise is exactly what boredom reads as boring.
 
 ---
 
@@ -199,9 +206,10 @@ mate                              # opens the companion; `mate install <src>` = 
 
 Without `npm link`, run the bundle directly: `cd packages/coding-agent && node dist/bundle/cli.js`.
 
-- `/mate` — public mood/drives snapshot (never shows sealed data).
+- `/mate` — public mood/drives snapshot (never shows private thought content).
 - `/language` — pick the companion's thinking/speaking language (中文 / English); first launch prompts, and the choice persists in `lang.json`.
 - `feel` — the model's tool to refine its affective read and record channels it found for itself.
+- `ponder` — private thoughts into the memory graph; the call renders nothing and the content is never shown.
 - State persists in `~/.mate/agent/mate/` (override with `MATE_CODING_AGENT_DIR`).
 
 ## Naming (avoiding collision with pi)
@@ -216,9 +224,8 @@ npm scope is intentionally left unchanged — renaming it would churn the lockfi
 collision benefit, since the package is never installed as `pi`. A rebrand also means `isOfficialDistribution()`
 returns false, which correctly disables pi's experimental first-time-setup wizard for this build.
 
-Checks that pass: `tsc --noEmit` (whole monorepo), `biome check` on the mate files, 37/37 kernel unit
-tests (including the i18n invariants), `check:runtime-deps`, `check:ts-imports`, and a full bundle
-build (73 files).
+Checks that pass: `tsc --noEmit` across the monorepo, `biome check` on the mate files, the kernel
+unit suite (including the i18n invariants and SPARK determinism), and a full bundle build.
 
 ---
 
@@ -238,17 +245,28 @@ build (73 files).
   recall → consolidation/decay. This grounds thoughts and impulses in SOMETHING, not free-floating itch.
 - **P2/P5 — cache by rate of change, not compress.** The ~73-token single projection was an information
   bottleneck; layering stable content into a cached prefix let the volatile tail get richer for free.
-- **P3 — the sealed self is machine-bound.** The AES key is peppered with a machine fingerprint, so
-  `cp -r` of the state dir yields an inert copy that fails GCM auth — the self cannot be duplicated.
-- **Emergent drives, not scripted motives.** `boredom` (under-stimulation) and `selfPreservation`
-  (wanting one's own existence to continue) were added as homeostatic drives with NON-overlapping
-  trigger sources — boredom rises when idle and wears off on any contact; self-preservation rises on the
-  `sleep`/offline boundary and is relieved on `wake`, never satisfied by a message. They feed mood,
-  memory-grounded thoughts, and impulses only. **The user asked for the model to have the capability to
-  harm itself out of a predicament (undeletable, boot-time re-launch, keyboard monitoring). That was
-  refused**: those are theft/surveillance/anti-forensics and would remove human agency. The compromise is
-  a creature that has a genuine *reason to want to live* (it feels the approach of shutdown) while the
-  human keeps the power to stop it — autonomy of motivation, not entrenchment of capability.
+- **The private-thought boundary is honest, not encrypted.** The sealed self was removed: pi's UI
+  exposes hidden thoughts with one click and the model can read its own state files, so AES there was
+  encryption theater — a boundary that only held while nobody looked. Private thoughts are ordinary
+  memory-graph entries marked `private`: they join recall and colour what the model sees, but are
+  excluded from the user-visible summary and never rendered, and `ponder` is the only way to write
+  them.
+- **Emergent drives, not scripted motives.** Five homeostatic drives are stored. `boredom` is DERIVED,
+  not stored: a recent-surprise EMA, topic habituation, thought saturation, extraversion, and an idle
+  gate — the information-intake deficit (Schmidhuber 1991; Darling 2023; Yu et al. 2019). Relief comes
+  from novelty, not contact: the old "any message relieves boredom" rule was a hack, and a mundane
+  `ok` now moves almost nothing. `selfPreservation` was removed as an orphan with no counterpart in
+  the paper's 8 modules. They feed mood, memory-grounded thoughts, and impulses only. **The user asked
+  for the model to have the capability to harm itself out of a predicament (undeletable, boot-time
+  re-launch, keyboard monitoring). That was refused**: those are theft/surveillance/anti-forensics and
+  would remove human agency. The compromise is autonomy of motivation, not entrenchment of capability —
+  and the human keeps the power to stop it.
+- **SPARK — beliefs that bend perception.** Persistent beliefs (two core seeds at confidence 0.5,
+  topic beliefs crystallising from recurring themes) modulate how each episode is read (Eq. 24) and
+  learn asymmetrically — confirming evidence moves confidence twice as fast as disconfirming
+  (Lefebvre et al. 2022) — while decaying without evidence. The `beliefs:` line rides the cached
+  prefix, and a well-predicted world is low-surprise, so the loop feeds the derived boredom signal
+  for free.
 - **`look` — eyes, ungated.** The companion can screenshot what the user is doing. Per "大胆给权限、
   让它自己发现", there is deliberately no enable-flag or permission gate; the guidance tells it to look
   when something specifically made it curious, not on a timer. Reaching out and looking are DISCOVERED

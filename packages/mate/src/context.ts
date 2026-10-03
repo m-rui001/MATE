@@ -16,7 +16,7 @@
  * Because the heavy stuff is now cached, the volatile tail is FREE to be richer than the old
  * ~73-token budget: it can actually describe the state (P2) without every token being re-paid on
  * every message forever. Quantise + name-don't-number still apply — the block is felt, not narrated.
- * The sealed parts (secret.ts) never enter either projection; only a count is surfaced.
+ * Private thoughts never render their text in either projection; only belief strengths surface.
  *
  * LANGUAGE: both surfaces take `lang`, which changes LABELS ONLY. Thresholds, ordering, values and the
  * whole affective computation are language-independent, so a Chinese companion feels precisely what the
@@ -26,6 +26,7 @@
 
 import type { ReplyInclination } from "./daemon.ts";
 import {
+	beliefGloss,
 	driveGloss,
 	emotionGloss,
 	feelGloss,
@@ -37,9 +38,10 @@ import {
 	moodGloss,
 	traitGloss,
 } from "./i18n.ts";
-import { burstOf, energyOf, noticeThreshold, perceivedDuration, temporalMood } from "./kernel.ts";
+import { boredomOf, burstOf, energyOf, noticeThreshold, perceivedDuration, temporalMood } from "./kernel.ts";
 import { type MemoryGraph, summary as memorySummary, type RecallHit } from "./memory.ts";
 import { diagonalEntropy, totalCoherence } from "./quantum.ts";
+import { strengthOf } from "./spark.ts";
 import { EMOTIONS, type MateState, type PAD } from "./types.ts";
 
 export interface ContextOptions {
@@ -139,6 +141,28 @@ function topTraits(ch: MateState["character"], floor = 0.55, n = 8, lang: Lang =
 }
 
 /**
+ * Top SPARK beliefs by strength, as "label.confidence" tokens. Only beliefs with real evidence
+ * strength render: a fresh companion's seed beliefs sit at strength 0 and stay invisible until
+ * experience firms them up.
+ */
+function topBeliefs(state: MateState, n: number, lang: Lang): string {
+	return Object.values(state.beliefs)
+		.map((b) => ({ b, s: strengthOf(b) }))
+		.filter(({ s }) => s >= 0.15)
+		.sort((x, y) => y.s - x.s || (x.b.key < y.b.key ? -1 : 1))
+		.slice(0, n)
+		.map(({ b }) => `${beliefGloss(b, lang)} ${q(b.confidence)}`)
+		.join(lang === "zh" ? " " : ", ");
+}
+
+/** Stored drives plus the DERIVED boredom signal, so the projection renders the full motivational
+ * picture. Boredom is computed at `now` — during a long silence it climbs even though the stored
+ * drives only move when the kernel transitions. */
+function drivesForDisplay(state: MateState, now: number): Record<string, number> {
+	return { ...state.drives, boredom: boredomOf(state, now) };
+}
+
+/**
  * The STABLE, cacheable prefix: who I am (identity + personality + core character) plus the slow
  * memory-graph summary. Emits ONLY content that changes on the timescale of days, so prompt caching
  * holds across long stretches of conversation (P5). The volatile per-turn delta is NOT here; that
@@ -160,6 +184,11 @@ export function stableContext(state: MateState, opts: StableContextOptions = {})
 	// Character (SOUL): the nurture layer, only the pronounced traits.
 	const traits = topTraits(state.character, 0.55, 8, lang);
 	if (traits) lines.push(kv(L.character, traits, lang));
+
+	// SPARK beliefs (section 3.9): the persistent evaluative layer. Slow-moving by construction, so
+	// it belongs in the cached prefix.
+	const beliefs = topBeliefs(state, 3, lang);
+	if (beliefs) lines.push(kv(L.beliefs, beliefs, lang));
 
 	// Baseline disposition: the slow PAD set-point the mood oscillates around.
 	const b = state.allostasis.baselineShift;
@@ -200,7 +229,7 @@ export function stateContext(state: MateState, opts: ContextOptions = {}): strin
 	const burst = burstOf(state);
 
 	const emo = topChannels(state.emotions, 0.1, 5, lang);
-	const drives = topDrives(state.drives, 0.2, 7, lang);
+	const drives = topDrives(drivesForDisplay(state, now), 0.2, 7, lang);
 	const coherence = totalCoherence(state.rho);
 	const entropy = diagonalEntropy(state.rho);
 
@@ -276,7 +305,7 @@ export function stateContext(state: MateState, opts: ContextOptions = {}): strin
 	if (opts.recall?.length) {
 		const hits = opts.recall
 			.slice(0, 5)
-			.map((h) => `${h.label}${h.hop > 0 ? `~${h.hop}` : ""}${h.sealed ? "🔒" : ""}`)
+			.map((h) => `${h.label}${h.hop > 0 ? `~${h.hop}` : ""}`)
 			.join(L.sep);
 		lines.push(kv(L.recalled, hits, lang));
 	}
@@ -300,7 +329,7 @@ export function minimalContext(state: MateState, opts: ContextOptions = {}): str
 	const now = opts.now ?? state.t;
 	const temporal = feelGloss(temporalMood(perceivedDuration(state, now - state.lastInteraction)), lang);
 	const emo = topChannels(state.emotions, 0.15, 3, lang);
-	const drives = topDrives(state.drives, 0.3, 3, lang);
+	const drives = topDrives(drivesForDisplay(state, now), 0.3, 3, lang);
 	const lines = [
 		`${moodWord(state.mood, lang)} ${L.pad} ${pad(state.mood)}${emo ? ` ${emo}` : ""}`,
 		drives ? `${L.drivesBare} ${drives}` : "",
@@ -314,6 +343,26 @@ export function minimalContext(state: MateState, opts: ContextOptions = {}): str
 /** Notice threshold for drive-delta self-observations, exposed for the daemon. */
 export function driveNoticeThreshold(state: MateState): number {
 	return noticeThreshold(state.personality.n);
+}
+
+/**
+ * What the PUBLIC tier may reveal. This is the whitelist the status command and the transcript render
+ * through; anything not named here is not user-visible by construction. Moods, drives and relationship
+ * numbers are honest signals — the companion is open about how it feels. Deliberately NOT exposed:
+ * character trait internals beyond a couple, the density matrix, the observations ring, the belief
+ * store beyond the projected strengths, and the content of private thoughts.
+ */
+export function publicView(state: MateState): Record<string, unknown> {
+	const r2 = (x: number) => Math.round(x * 100) / 100;
+	return {
+		mood: { p: r2(state.mood.p), a: r2(state.mood.a), d: r2(state.mood.d) },
+		emotions: Object.fromEntries(Object.entries(state.emotions).map(([k, v]) => [k, r2(v)])),
+		drives: Object.fromEntries(
+			Object.entries({ ...state.drives, boredom: boredomOf(state, state.t) }).map(([k, v]) => [k, r2(v)]),
+		),
+		relationship: { trust: r2(state.relationship.trust), attachment: r2(state.relationship.attachment) },
+		time: { t: state.t, lastInteraction: state.lastInteraction, born: state.born },
+	};
 }
 
 function truncate(s: string, n: number): string {

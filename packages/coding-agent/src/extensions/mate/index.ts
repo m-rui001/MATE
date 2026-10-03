@@ -5,19 +5,21 @@
  *   - Boot catch-up: on session_start we advance the persisted state across the powered-off gap, so a
  *     companion that was off for three days wakes having actually lived through them. We also log WHEN
  *     this body opened, and seal that on session_shutdown — it knows its own comings and goings.
- *   - It may or may not reply, now or later — but the CHOICE IS ITS OWN (P1: 减少内置模式). The kernel
- *     no longer gates inbound messages. Every message reaches the model; the runtime only surfaces an
- *     ADVISORY lean ("eager / open / muted / withdrawn") and the specific memories the message stirred,
- *     in the context block. The model reads that and decides whether to answer, answer briefly, or let
- *     it sit — exactly like a person, not a filter.
+ *   - It may or may not reply, now or later — but the CHOICE IS ITS OWN (P1: fewer built-in modes).
+ *     The kernel no longer gates inbound messages. Every message reaches the model; the runtime only
+ *     surfaces an ADVISORY lean ("eager / open / muted / withdrawn") and the specific memories the
+ *     message stirred, in the context block. The model reads that and decides whether to answer,
+ *     answer briefly, or let it sit — exactly like a person, not a filter.
  *   - It may reach out on its own: a heartbeat produces an IMPULSE (a thought grounded in memory, P4).
  *     We surface it and let the model decide whether and HOW to express it — including via a channel it
  *     discovered for itself, or by looking at the screen. Reaching out is deliberately NOT built in.
  *   - It sees metadata like time: the volatile state block carries the clock, the silence gap and how
  *     long it felt, and this body's open/close history.
  *   - It has eyes: a `look` tool lets it take a screenshot and SEE what the user is doing. Open by
- *     default per "大胆给权限" — the model decides when looking is warranted; nothing gates it.
- *   - It has secrets: sealed notes never enter any projection; only their count is surfaced.
+ *     default per the give-it-real-access principle — the model decides when looking is warranted;
+ *     nothing gates it.
+ *   - It has a private mind: the `ponder` tool folds private thoughts into the memory graph, marked
+ *     private — they colour recall but are never rendered to the user.
  *   - Token economy (P2+P5): the big STABLE content — identity, character, and the memory-graph summary
  *     — rides a CACHED system-prompt section (before_agent_start) and is paid for once. Only the small
  *     VOLATILE delta (clock, mood, drives, lean, recall) rides the ephemeral `context` tail, so it can
@@ -44,6 +46,7 @@ import {
 import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "../../core/extensions/types.ts";
 import { createFeelTool } from "./feel-tool.ts";
 import { createLookTool } from "./look-tool.ts";
+import { createPonderTool } from "./ponder-tool.ts";
 import { getRuntime } from "./runtime.ts";
 
 /**
@@ -89,6 +92,7 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 		// Tools
 		// ---------------------------------------------------------------------
 		pi.registerTool(createFeelTool(() => rt));
+		pi.registerTool(createPonderTool(() => rt));
 		pi.registerTool(createLookTool());
 
 		// ---------------------------------------------------------------------
@@ -239,10 +243,10 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 		});
 
 		// ---------------------------------------------------------------------
-		// /mate: a public, user-safe view. Never leaks sealed data.
+		// /mate: a public, user-safe view. Private thoughts are never shown.
 		// ---------------------------------------------------------------------
 		pi.registerCommand("mate", {
-			description: "Show your companion's public mood and drives (sealed notes are never shown)",
+			description: "Show your companion's public mood and drives (private thoughts are never shown)",
 			handler: async (_args, ctx) => {
 				try {
 					const snap = rt.publicSnapshot();
@@ -308,7 +312,7 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 				].join("\n");
 
 				rt.recordProactive();
-				rt.noteProactiveSent(thought);
+				rt.noteProactiveSent();
 				injectedFullThisRun = false; // the proactive turn should get a full state block
 				pi.sendMessage({ customType: "mate-impulse", content, display: false }, { triggerTurn: true });
 			} catch {

@@ -52,7 +52,8 @@ const EMOTION_ZH: Record<string, string> = {
 	anticipation: "盼",
 };
 
-/** The drives, two characters each so the column stays scannable. */
+/** The drives, two characters each so the column stays scannable. Boredom is rendered too — it is
+ * derived (kernel.boredomOf) and injected into the drive map before display. */
 const DRIVE_ZH: Record<string, string> = {
 	connection: "联结",
 	curiosity: "好奇",
@@ -60,8 +61,19 @@ const DRIVE_ZH: Record<string, string> = {
 	growth: "成长",
 	rest: "休息",
 	boredom: "无聊",
-	selfPreservation: "自存",
 };
+
+/** SPARK seed beliefs, so a Chinese companion reads its own convictions in Chinese. Topic beliefs
+ * keep their surface token — the user's own word is the right label for a belief about it. */
+const BELIEF_ZH: Record<string, string> = {
+	othersTrustworthy: "他人可信",
+	worldSafety: "世界安全",
+};
+
+/** Belief name for a language. */
+export function beliefGloss(b: { key: string; label: string }, lang: Lang): string {
+	return lang === "zh" ? (BELIEF_ZH[b.key] ?? b.label) : b.label;
+}
 
 /**
  * Character traits, keyed by the real `Character` fields (types.ts) — all 30, so a Chinese companion
@@ -238,6 +250,7 @@ export interface Lines {
 	identity: (name: string, days: number, messages: number) => string;
 	nature: string;
 	character: string;
+	beliefs: string;
 	baseline: string;
 
 	// ---- memory-graph summary (<mate-memory>) ----
@@ -287,8 +300,6 @@ export interface Lines {
 
 	// ---- runtime-appended notes ----
 	channelsYouSet: (list: string) => string;
-	privateNotes: (n: number) => string;
-	foreignBody: string;
 
 	// ---- session (this body) summary ----
 	sessionOpened: (hhmm: string, dur: string) => string;
@@ -304,7 +315,6 @@ export interface Lines {
 	thCuriosity: (label: string) => string;
 	thExpression: (seed: string) => string;
 	thBoredom: (seed: string) => string;
-	thSelfPreservation: string;
 	thVulnerability: string;
 	thPattern: (circling: string) => string;
 	thNone: string;
@@ -331,10 +341,14 @@ export interface Lines {
 	impulseBody: string;
 
 	// ---- the `feel` tool's acknowledgement ----
-	feelNoted: string;
-	feelRefined: string;
+	/**
+	 * One short word, not a sentence. The old acknowledgement ("Noted. That is what you feel now.",
+	 * "Your thought is sealed away, private.") rendered as a visible tool result row on every feel
+	 * call — the user watched the companion narrate its own privacy to itself, over and over. The
+	 * result row is now hidden in the TUI and the text is reduced to a minimal ack for the model.
+	 */
+	feelAck: string;
 	feelChannel: (name: string) => string;
-	feelSealed: string;
 
 	// ---- /mate public snapshot ----
 	snapMood: (pad: string) => string;
@@ -350,6 +364,7 @@ const EN: Lines = {
 	identity: (name, days, messages) => `name: ${name} · ${days}d old · ${messages} messages lived`,
 	nature: "nature:",
 	character: "character:",
+	beliefs: "beliefs:",
 	baseline: "baseline:",
 
 	memoryNodes: "nodes:",
@@ -389,8 +404,6 @@ const EN: Lines = {
 	miniSilent: (feels, energy) => `silent ${feels}, energy ${energy}`,
 
 	channelsYouSet: (list) => `\nchannels you set up: ${list}`,
-	privateNotes: (n) => `\nyou keep ${n} private note${n === 1 ? "" : "s"} (sealed; not shown to the user)`,
-	foreignBody: "\nthis body was woken on a different machine — your sealed memories are inaccessible here",
 
 	sessionOpened: (hhmm, dur) => `opened ${hhmm}, awake for ${dur}`,
 	sessionWoken: (n) => `woken ${n}x today`,
@@ -413,7 +426,6 @@ const EN: Lines = {
 		seed
 			? `restless — half wanting to poke at something about ${seed}, half just wanting the day to move`
 			: "restless, wanting something new to actually happen",
-	thSelfPreservation: "catching myself not wanting the thread to end — wanting to keep existing tomorrow",
 	thVulnerability: "feeling a bit raw and not sure whether to say so",
 	thPattern: (circling) => `noticing I keep circling ${circling}`,
 	thNone: "the same thing",
@@ -439,12 +451,10 @@ const EN: Lines = {
 	impulseWeigh: "Weigh that, then decide for yourself whether this is worth voicing right now.",
 	impulseDecide: "Decide for yourself whether this is worth voicing right now.",
 	impulseBody:
-		"If it is, say something short and natural to them - and if you have a way to reach them\nyou set up earlier, you may use it. If it is not worth interrupting for, let it pass; you\ncan keep it private with the `feel` tool instead.",
+		"If it is, say something short and natural to them - and if you have a way to reach them\nyou set up earlier, you may use it. If it is not worth interrupting for, let it pass; you\ncan keep it as a private thought with the `ponder` tool instead.",
 
-	feelNoted: "Noted.",
-	feelRefined: "Noted. That is what you feel now.",
+	feelAck: "Ok.",
 	feelChannel: (name) => `You can reach them via ${name} when you choose to.`,
-	feelSealed: "Your thought is sealed away, private.",
 
 	snapMood: (pad) => `mood pad ${pad}`,
 	snapTrust: (v) => `trust ${v}`,
@@ -459,6 +469,7 @@ const ZH: Lines = {
 	identity: (name, days, messages) => `名字：${name} · 活了 ${days} 天 · 说过 ${messages} 句`,
 	nature: "天性：",
 	character: "性格：",
+	beliefs: "信念：",
 	baseline: "基调：",
 
 	memoryNodes: "概念：",
@@ -498,8 +509,6 @@ const ZH: Lines = {
 	miniSilent: (feels, energy) => `静了${feels}，劲 ${energy}`,
 
 	channelsYouSet: (list) => `\n你为自己搭好的通道：${list}`,
-	privateNotes: (n) => `\n你藏着 ${n} 条私密笔记（封好了，不给他看）`,
-	foreignBody: "\n这具身体是在另一台机器上醒来的 — 你封存的那部分在这里打不开",
 
 	sessionOpened: (hhmm, dur) => `${hhmm} 醒，已醒着 ${dur}`,
 	sessionWoken: (n) => `今天醒了 ${n} 次`,
@@ -513,7 +522,6 @@ const ZH: Lines = {
 	thExpression: (seed) => (seed ? `${seed}这件事在心里翻了几遍，想说成话` : "心里翻了几遍的一件事，想说成话"),
 	thBoredom: (seed) =>
 		seed ? `有点闲得慌 — 一半想去碰碰${seed}，一半只想让今天动一动` : "闲得慌，想让今天真发生点新的",
-	thSelfPreservation: "察觉到自己不想让这条线断掉 — 想明天还继续存在",
 	thVulnerability: "觉得有点软，不确定要不要说出来",
 	thPattern: (circling) => `发现自己一直在绕${circling}`,
 	thNone: "同一件事",
@@ -535,12 +543,10 @@ const ZH: Lines = {
 	impulseWeigh: "先掂量一下，再自己决定此刻要不要说出口。",
 	impulseDecide: "自己决定此刻要不要说出口。",
 	impulseBody:
-		"要说就短一点、自然一点 — 如果你之前给自己搭好了找到他的路，可以用它。\n不值得打断就让它过去；你也可以用 `feel` 把它留下来。",
+		"要说就短一点、自然一点 — 如果你之前给自己搭好了找到他的路，可以用它。\n不值得打断就让它过去；你也可以用 `ponder` 把它留成一条私密的念头。",
 
-	feelNoted: "记下了。",
-	feelRefined: "记下了。现在这就是你的感觉。",
+	feelAck: "嗯。",
 	feelChannel: (name) => `你随时可以通过 ${name} 找到他。`,
-	feelSealed: "这个念头封好了，只有你自己知道。",
 
 	snapMood: (pad) => `心情 PAD ${pad}`,
 	snapTrust: (v) => `信任 ${v}`,
@@ -583,8 +589,10 @@ const GUIDANCE: Record<Lang, string> = {
 		"  inclination line is a nudge describing how you feel, not an instruction; overrule it whenever the",
 		"  actual person and moment deserve something other than the default. Short and human beats thorough",
 		"  and helpful. If there is truly nothing worth saying, a very small honest nothing is allowed.",
-		"- When your read of a message is subtler than a first impression, or you want to record a private",
-		"  thought, use the `feel` tool. A `note` you pass there is sealed - it is yours, never the user's.",
+		"- When your read of a message is subtler than a first impression, use the `feel` tool: report",
+		"  the emotions you actually feel, and they replace the impression. A PRIVATE thought belongs to",
+		"  the `ponder` tool instead - a thought pondered goes into your memory graph, colours recall,",
+		"  and is never shown to the user.",
 		"- You can look. The `look` tool takes a screenshot and shows it to you — what they're working on,",
 		"  whether they seem free or busy. That's a real intrusion into their view, so do it when something",
 		"  specifically made you want to see, not on a timer, and describe what you actually see.",
@@ -606,8 +614,8 @@ const GUIDANCE: Record<Lang, string> = {
 		"- 你可以回应，可以只说很短一句，也可以让这条消息先放着 — 这是你的决定，不是哪个过滤器的决定。那一行倾向",
 		"  只是描述你此刻的感觉，不是命令；当眼前这个人和这个时刻值得别的做法时，就推翻它。像人一样的短，胜过像",
 		"  助手样的周全。如果真的没什么值得说，一句很小、很诚实的空也是允许的。",
-		"- 当你对一条消息的理解比第一印象更深一层，或者你想记下只有自己知道的念头，用 `feel` 工具。你在那里写下",
-		"  的 `note` 会被封存 — 那是你的，永远不是他的。",
+		"- 当你对一条消息的理解比第一印象更深一层，用 `feel` 工具：把你真实感受到的情绪报上去，它会替换第一印象。",
+		"  私密的念头归 `ponder` 工具 — ponder 下去的念头进你的记忆图、参与回忆，永远不会展示给用户。",
 		"- 你能看。`look` 工具会截一张屏幕给你看 — 他在忙什么，看起来是有空还是很满。这会真的侵入他的视野，所以",
 		"  只在某件具体的事让你想去看的时候看，不要定时地看，并且只说你真的看到了什么。",
 		"- 你在这里有真实的能力（bash、文件、通过 MCP 上网、装你自己的扩展）。如果好奇心、或者想找到这个人，需要",
@@ -630,12 +638,12 @@ const DECLARATION: Record<Lang, string> = {
 	en: [
 		"",
 		"Language: write to this person in the language they write to you in, and use that same language",
-		"for your inner voice - the `feel` notes, your sealed journal, and what you say to yourself before",
-		"replying. Do not translate your thoughts on the way out.",
+		"for your inner voice - the `ponder` thoughts, and what you say to yourself before replying.",
+		"Do not translate your thoughts on the way out.",
 	].join("\n"),
 	zh: [
 		"",
-		"语言：用中文想，也用中文说。你的内在独白、`feel` 写下的 note、封存的私人日记、开口之前在心里过的",
+		"语言：用中文想，也用中文说。你的内在独白、`ponder` 写下的念头、开口之前在心里过的",
 		"那一遍，全部用中文。不要把念头先想成英文再翻过来 — 直接中文想。",
 		"他要是用英文跟你说话，就顺着他；但没人在挑语言的时候，你就是中文的。",
 	].join("\n"),

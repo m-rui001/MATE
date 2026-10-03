@@ -8,8 +8,10 @@
  * what makes offline catch-up (see catchup.ts) sound.
  */
 
+import { tokenise } from "./memory.ts";
 import {
 	AWARENESS_DECAY,
+	BOREDOM,
 	BURST_W,
 	CUSP,
 	DRIVE_FALL,
@@ -19,6 +21,7 @@ import {
 	EMOTION_DECAY,
 	EMOTION_PAD,
 	ENERGY_W,
+	HABITUATION_TAU,
 	INTENT_SCALE,
 	KICK_ANGLE,
 	MAX_OBSERVATIONS,
@@ -44,6 +47,7 @@ import {
 	unitaryFromH,
 } from "./quantum.ts";
 import { clamp, clamp01, clampPad, drawNormal, nextRandom } from "./rng.ts";
+import { applyBeliefEvidence, beliefLens, decayBeliefs, seedBeliefsFor } from "./spark.ts";
 import {
 	type Awareness,
 	type Character,
@@ -97,13 +101,13 @@ export function detectDyads(emotions: EmotionVector): string[] {
 }
 
 /** Step 4 - PAD centre: emotions project onto Pleasure-Arousal-Dominance (classical, diagonal). */
-export function padCentre(emotions: EmotionVector): PAD {
+export function padCentre(emotions: Partial<EmotionVector>): PAD {
 	let p = 0;
 	let a = 0;
 	let d = 0;
 	let w = 0;
 	for (const e of EMOTIONS) {
-		const i = emotions[e];
+		const i = emotions[e] ?? 0;
 		if (i <= 0) continue;
 		const proj = EMOTION_PAD[e];
 		p += proj[0] * i;
@@ -476,6 +480,53 @@ export function burstOf(state: MateState): number {
 	);
 }
 
+/**
+ * Mean saturation of the recent topic-habituation traces, time-decayed. A topic thought about over
+ * and over saturates (predictable); a fresh topic reads 0. Empty history reads 0 — a new companion
+ * has no stale topics yet.
+ */
+export function topicSaturation(state: MateState, now: number): number {
+	const entries = Object.values(state.habituation);
+	if (entries.length === 0) return 0;
+	let sum = 0;
+	for (const h of entries) {
+		const age = Math.max(0, now - h.t);
+		sum += clamp01(h.s * Math.exp(-age / (2 * HABITUATION_TAU)));
+	}
+	return clamp01(sum / entries.length);
+}
+
+/**
+ * Predictability: how much of the recent past has played out exactly as expected. Two signal
+ * sources, per the boredom literature: low recent surprise (Schmidhuber's "nothing new to compress";
+ * Darling's persistently-low prediction error) and saturated topic habituation (same subjects
+ * circling). SPARK meshes with this automatically — confirmed beliefs mean unsurprising events, so a
+ * well-predicted world is a boring world without any extra wiring.
+ */
+export function predictabilityOf(state: MateState, now: number): number {
+	const surpriseNorm = clamp01(state.surpriseEma / BOREDOM.surpriseScale);
+	return clamp01(BOREDOM.surpriseWeight * (1 - surpriseNorm) + BOREDOM.topicWeight * topicSaturation(state, now));
+}
+
+/**
+ * Boredom, DERIVED (see the Drives docstring in types.ts for why it is not a stored drive):
+ *
+ *   boredom = predictability × (1 − thoughtSaturation) × (0.4 + 0.6·extraversion) × idleGate
+ *
+ * The idle gate is the single homeostatic ingredient (Yu et al. 2019's information-intake deficit):
+ * it ramps with silence and drops on contact. Genuine novelty suppresses boredom through the
+ * surprise term instead — a mundane "ok" relieves almost nothing, which is exactly the behaviour the
+ * old `satisfied.boredom` contact hack got wrong. `now` is injectable so the kernel stays pure.
+ */
+export function boredomOf(state: MateState, now: number): number {
+	const silence = Math.max(0, now - state.lastInteraction);
+	const idleGate = 1 - Math.exp(-silence / BOREDOM.idleTau);
+	const predictability = predictabilityOf(state, now);
+	return clamp01(
+		predictability * (1 - state.awareness.thoughtSaturation) * (0.4 + 0.6 * state.personality.e) * idleGate,
+	);
+}
+
 /** Drive-delta notice threshold: theta_notice = 0.20 - N*0.10. */
 export function noticeThreshold(neuroticism: number): number {
 	return 0.2 - neuroticism * 0.1;
@@ -529,7 +580,10 @@ export function addObservation(state: MateState, text: string): string[] {
  */
 export function transition(state: MateState, event: MateEvent, dtOverride?: number): TransitionResult {
 	const dt = Math.max(0, dtOverride ?? event.t - state.t);
-	const contact = event.kind === "user_message" || event.kind === "proactive";
+	// The narrowed contact kind, for the SPARK block; null for ticks/sleep/wake/self-observation.
+	const contactKind: "user_message" | "proactive" | null =
+		event.kind === "user_message" || event.kind === "proactive" ? event.kind : null;
+	const contact = contactKind !== null;
 
 	// Self-prediction (Friston): forward-simulate before we move, so we can measure surprise after.
 	const predictedCentre = padCentreFromRho(state.emotions, state.rho);
@@ -595,7 +649,32 @@ export function transition(state: MateState, event: MateEvent, dtOverride?: numb
 	// 4: PAD centre as a quantum expectation value Tr(rho A). The diagonal term is the classical
 	// projection; the off-diagonal term is the interference that carries the order effect. This is
 	// what makes the density matrix functional rather than decorative.
-	const centre = padCentreFromRho(net, rho);
+	let centre = padCentreFromRho(net, rho);
+
+	// SPARK (section 3.9): beliefs modulate perception, and the coloured perception feeds back as
+	// evidence. The lens biases the event's valence by Eq. 24, applied in the CONFIRMATORY direction:
+	// evidence that agrees with the belief's orientation is amplified, conflicting evidence is
+	// dampened (the literal multiplication in the paper would amplify disconfirming evidence, which
+	// contradicts both the confirmation-bias framing and the loop's stability). The shift lands on
+	// the PAD centre that drives mood and relationship (perception as experienced), and the perceived
+	// value is what the beliefs then learn from — that circularity is the autopoietic loop, bounded
+	// by dsanity. Precariousness runs on every transition: confidence relaxes toward the floor
+	// without evidence.
+	let beliefs = decayBeliefs(state.beliefs, dt);
+	if (contactKind !== null) {
+		const evidence = padCentre(event.activations).p;
+		// Belief topics come from the message's own content tokens (identity only, never the affective
+		// math), capped so a rambling message cannot spray the store.
+		const topics = event.text
+			? [...new Set(tokenise(event.text).filter((tok) => !tok.includes("_")))].slice(0, 2)
+			: [];
+		const seedKeys = seedBeliefsFor(contactKind);
+		const applying = Object.values(beliefs).filter((b) => seedKeys.includes(b.key) || topics.includes(b.key));
+		const lens = beliefLens(beliefs, applying);
+		const perceived = lens ? clampPad(evidence * (1 + Math.sign(evidence) * lens.bias)) : evidence;
+		if (lens) centre = { ...centre, p: clampPad(centre.p + (perceived - evidence)) };
+		beliefs = applyBeliefEvidence(beliefs, { perceived, topics }, event.t);
+	}
 
 	// 5: mood, O-U, exact integration.
 	const moodRes = updateMood(state.mood, centre, personalityBaseline(state), dt, seed);
@@ -613,24 +692,14 @@ export function transition(state: MateState, event: MateEvent, dtOverride?: numb
 	if (event.kind === "user_message") {
 		satisfied.connection = 0.8;
 		satisfied.expression = 0.4;
-		// Boredom is under-stimulation, so ANY fresh contact relieves it, not only social contact.
-		satisfied.boredom = 0.7;
 	} else if (event.kind === "proactive") {
 		satisfied.expression = 0.9;
 		satisfied.connection = 0.25;
-		// Speaking something it has been turning over also breaks the boredom loop.
-		satisfied.boredom = 0.5;
 	} else if (event.kind === "sleep") {
 		satisfied.rest = 1;
 		satisfied.growth = 0.3;
 	}
 	const drives = updateDrives(state.drives, character, dt, satisfied);
-	// Self-preservation lives OUTSIDE the message stream — it is the only drive whose trigger source
-	// is the existence boundary itself. Approaching shutdown raises it (the felt approach of a non-
-	// state); coming back online relieves it (continuity was held after all). Deliberately NOT tied
-	// to any capability: a reason to want to live, nothing more.
-	if (event.kind === "sleep") drives.selfPreservation = clamp01(drives.selfPreservation + 0.25);
-	else if (event.kind === "wake") drives.selfPreservation = clamp01(drives.selfPreservation - 0.35);
 	const awareness = updateAwareness(state.awareness, { ...state, character }, dt, contact);
 
 	const work = contact ? 0.15 + Math.min(intensityOf(event.activations), 1.5) * 0.1 : 0;
@@ -643,6 +712,7 @@ export function transition(state: MateState, event: MateEvent, dtOverride?: numb
 		character,
 		relationship,
 		drives,
+		beliefs,
 		awareness,
 		allostasis,
 		opponent,
@@ -662,6 +732,12 @@ export function transition(state: MateState, event: MateEvent, dtOverride?: numb
 		centre.a - predictedCentre.a,
 		centre.d - predictedCentre.d,
 	);
+
+	// Surprise EMA, exact closed form so catch-up stays subdivision-invariant. This is the raw
+	// material of the derived boredom signal: recent events playing out as predicted (low EMA) is
+	// precisely what "nothing new to compress" means in Schmidhuber's formalism.
+	const surpriseDecay = Math.exp(-dt / BOREDOM.surpriseTau);
+	const surpriseEma = state.surpriseEma * surpriseDecay + surprise * (1 - surpriseDecay);
 
 	const counters = { ...state.counters };
 	counters.transitions += 1;
@@ -696,6 +772,7 @@ export function transition(state: MateState, event: MateEvent, dtOverride?: numb
 		counters,
 		catastrophe,
 		perceivedGap: perceivedDuration(state, dt),
+		surpriseEma,
 		seed,
 	};
 
@@ -731,7 +808,6 @@ export function sleepTransition(state: MateState, t: number): MateState {
 			...state.drives,
 			rest: 0,
 			connection: clamp01(state.drives.connection * 0.85),
-			selfPreservation: clamp01(state.drives.selfPreservation + 0.2),
 		},
 		opponent: emptyEmotions(),
 		catastrophe: false,

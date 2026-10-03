@@ -1,7 +1,7 @@
 /**
- * Memory invariants. These tests target the FORGETTING model specifically — the balance the user
- * asked about ("遗忘和记忆的关系"). Four properties have to hold, and three of them were wrong in the
- * first version of this module:
+ * Memory invariants. These tests target the FORGETTING model specifically — the remembering vs
+ * forgetting balance this module exists to strike. Four properties have to hold, and three of them
+ * were wrong in the first version of this module:
  *   1. `topNodes` actually reads strength (regression against a bug where the comparator paired one
  *      node's recency with the other's strength, silently dropping strength from the score).
  *   2. `consolidate` is TIME-AWARE: a longer offline gap costs more forgetting than a shorter one,
@@ -23,6 +23,7 @@ import {
 	nodeKey,
 	recall,
 	rehearse,
+	summary,
 	tokenise,
 	topNodes,
 } from "../src/memory.ts";
@@ -181,12 +182,37 @@ describe("memory: tokenise + encode basics (unchanged guarantees)", () => {
 		expect(a).toContain("cold_coffee");
 	});
 
-	it("splits CJK into per-character unigrams", () => {
-		const toks = tokenise("你好，世界");
-		expect(toks).toContain("你");
-		expect(toks).toContain("好");
-		expect(toks).toContain("世");
-		expect(toks).toContain("界");
+	it("segments CJK into dictionary words with particle dropping", () => {
+		// Punctuation ends a CJK run, so each side segments independently: real word boundaries
+		// (你好 | 世界), never the individual characters — the old per-character unigram bug.
+		const punct = tokenise("你好，世界");
+		expect(punct).toContain("你好");
+		expect(punct).toContain("世界");
+		expect(punct).not.toContain("你");
+		expect(punct).not.toContain("好");
+		expect(punct).not.toContain("世");
+		expect(punct).not.toContain("界");
+		// One uninterrupted run yields the same words.
+		const run = tokenise("你好世界");
+		expect(run).toContain("你好");
+		expect(run).toContain("世界");
+		expect(run).not.toContain("好世"); // sliding-bigram noise must not come back
+		// An isolated single char is a real word and survives.
+		expect(tokenise("好")).toEqual(["好"]);
+		// Particles are dropped wherever the segmenter surfaces them: 我的猫 → 我 + 猫.
+		const particles = tokenise("我的猫");
+		expect(particles).toContain("我");
+		expect(particles).toContain("猫");
+		expect(particles).not.toContain("的");
+		// The tokeniser stays deterministic on CJK input.
+		expect(tokenise("你好世界")).toEqual(tokenise("你好世界"));
+	});
+
+	it("builds cross-language bigrams between latin and CJK tokens", () => {
+		const toks = tokenise("cold 你好");
+		expect(toks).toContain("cold");
+		expect(toks).toContain("你好");
+		expect(toks).toContain("cold_你好");
 	});
 
 	it("encode folds a trace into nodes and edges with the episode's valence", () => {
@@ -199,5 +225,21 @@ describe("memory: tokenise + encode basics (unchanged guarantees)", () => {
 		);
 		expect(e).toBeDefined();
 		expect(e!.weight).toBeLessThan(0);
+	});
+});
+
+describe("memory: private thoughts", () => {
+	it("keeps private nodes out of the summary but reachable via recall", () => {
+		// A private note is an ordinary graph node — it encodes, reinforces and recalls like any
+		// other — but `summary` is the user-visible block, so its label must never render there.
+		let g = encode(emptyMemory(), { text: "whisper", pad: { p: 0, a: 0, d: 0 }, t: 0, private: true });
+		g = encode(g, { text: "rainbow", pad: { p: 0, a: 0, d: 0 }, t: 1 });
+		expect(g.nodes[nodeKey("whisper")]).toBeDefined();
+		const s = summary(g);
+		expect(s).not.toContain("whisper");
+		expect(s).toContain("rainbow");
+		// Private means unrendered, not forgotten: recall still finds it by seed.
+		const hits = recall(g, { seeds: [nodeKey("whisper")], now: 1 });
+		expect(hits.some((h) => h.label === "whisper")).toBe(true);
 	});
 });

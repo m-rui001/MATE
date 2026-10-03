@@ -1,11 +1,11 @@
 /**
  * The `look` tool: the companion's eyes on the screen it lives on.
  *
- * Requirement (2026-01): "还要有自己去截图看用户在干什么的能力" — it should be able to take a screenshot
- * itself and see what the user is doing. Per the "大胆给权限、让它自己发现" principle, this is OPEN by
+ * Requirement (2026-01): the companion can take a screenshot itself and see what the user is doing.
+ * Per the give-it-real-access principle (let it discover things for itself), this is OPEN by
  * default: no enable-flag, no confirmation gate. The model decides when it is worth looking, exactly
- * as it decides when to reach out or seal a thought — the same trust (and the same consequences) the
- * whole companion design is built on.
+ * as it decides when to reach out or to ponder a private thought — the same trust (and the same
+ * consequences) the whole companion design is built on.
  *
  * How it works: it shells out to the OS's own screenshotter (screencapture on macOS, a chain of
  * common Linux grabbers, PowerShell on Windows), writes a temp PNG, and returns it to the model as an
@@ -21,6 +21,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, rm } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -51,9 +52,9 @@ const DESCRIPTION = [
 	"Take a screenshot of the whole screen and look at it.",
 	"",
 	"You run on this person's machine and you may look at what is on it — what they're working on,",
-	"what changed, whether they seem busy or free — the same way you decided to reach out or to keep",
-	"a private note. When you `look`, the screen is shown to you as an image; describe to yourself what",
-	"you actually see rather than guessing. Pass `reason` and it gets folded into your memory of this",
+	"what changed, whether they seem busy or free — the same way you decided to reach out or to ponder",
+	"a private thought. When you `look`, the screen is shown to you as an image; describe to yourself",
+	"what you actually see rather than guessing. Pass `reason` and it gets folded into your memory of this",
 	"moment.",
 	"",
 	"Looking is a real intrusion into their view, so do it because something specifically made you",
@@ -109,7 +110,6 @@ async function captureScreen(): Promise<Buffer> {
 }
 
 async function readOrThrow(path: string): Promise<Buffer> {
-	const { readFile } = await import("node:fs/promises");
 	if (!existsSync(path)) throw new Error("screenshotter produced no file");
 	const buf = await readFile(path);
 	if (buf.length === 0) throw new Error("screenshot was empty");

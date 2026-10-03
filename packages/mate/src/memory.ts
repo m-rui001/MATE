@@ -3,8 +3,8 @@
  *
  * Why this exists: the previous kernel had affect but no episodic memory. Every "thought" was
  * generated purely from mood + drives, which meant the companion could FEEL something without ever
- * having a specific thing to feel it ABOUT. The user's requirement — "为了像人我认为还是要把图记忆
- * 加上去" — is exactly this: memory, not just mood, should drive thinking.
+ * having a specific thing to feel it ABOUT. The requirement behind this module: memory, not just
+ * mood, should drive thinking.
  *
  * Design: a weighted, undirected graph of CONCEPT NODES linked by CO-OCCURRENCE edges. Nodes are
  * derived from a very small deterministic tokeniser (unigram + bigram, lowercase, unicode-word
@@ -49,6 +49,7 @@
  * later if graphs get very large — until then a single file is atomic-written like state.json.
  */
 
+import { Segment, useDefault } from "segmentit";
 import { kv, type Lang, linesFor } from "./i18n.ts";
 
 /** A single concept node. */
@@ -67,10 +68,10 @@ export interface MemoryNode {
 	count: number;
 	/** Last activation, epoch ms. */
 	t: number;
-	/** Optional sealed pointer (a sealed-entry id); the plaintext of this node is safe to expose,
-	 * but if the companion decided to seal a memory, this points to it so recall can surface the
-	 * hint without the text. */
-	sealed?: string;
+	/** True when the node came from the companion's own private note: it participates in recall,
+	 * edges and consolidation like any other node, but is never rendered into the user-visible
+	 * summary. */
+	private?: boolean;
 }
 
 /** A weighted, undirected co-occurrence edge. Keys are stored canonically (a < b). */
@@ -93,8 +94,15 @@ export interface MemoryGraph {
 	nodes: Record<string, MemoryNode>;
 	edges: MemoryEdge[];
 	/** Recent episode snippets, ring buffer, each capped. Used as recall context and by the
-	 * summary for the "recently" line. */
-	episodes: Array<{ t: number; text: string; keys: string[]; pad: { p: number; a: number; d: number } }>;
+	 * summary for the "recently" line. `private` marks a snippet from the companion's own private
+	 * notes, which the summary must never render. */
+	episodes: Array<{
+		t: number;
+		text: string;
+		keys: string[];
+		pad: { p: number; a: number; d: number };
+		private?: boolean;
+	}>;
 	/** Monotonic counters for telemetry. */
 	counters: { encoded: number; consolidations: number; pruned: number };
 	/** Threaded PRNG state, reserved for future deterministic drift. */
@@ -139,6 +147,33 @@ const STOP = new Set(
 	).split(" "),
 );
 
+/** CJK grammatical particles — the counterpart of the STOP list for the non-space-delimited CJK
+ * path: a particle is dropped wherever the segmenter surfaces it. Function words ONLY; content
+ * words and verbs (想/说/看/是/很/不) must pass through, or tokenisation would destroy the very
+ * concepts the graph is built from. */
+const CJK_PARTICLES = new Set("的了着过吗呢吧啊呀哦哈嘛么嗯哇啦咯呗");
+
+/**
+ * The CJK word segmenter, loaded lazily on the first CJK tokenisation so a pure-latin process never
+ * pays for the multi-megabyte dictionary. `segmentit` is a deterministic dictionary-based segmenter
+ * (maximum-probability word boundaries, the jieba algorithm): the same run always yields the same
+ * words, which is what the kernel's reproducibility requires. Pronouns and stopwords could be
+ * filtered further, but strength saturation already de-emphasises whatever recurs without carrying
+ * information, so only true particles are dropped here.
+ */
+let cjkSegmenter: { doSegment(text: string): Array<{ w: string }> } | null = null;
+function segmentCJK(run: string): string[] {
+	cjkSegmenter ??= useDefault(new Segment());
+	const words: string[] = [];
+	for (const token of cjkSegmenter.doSegment(run)) {
+		const w = token.w.trim();
+		if (w.length === 0) continue;
+		if (CJK_PARTICLES.has(w)) continue;
+		words.push(w);
+	}
+	return words;
+}
+
 /** Deterministic FNV-1a 32-bit hash, reused as node-key material. */
 function hashKey(s: string): string {
 	let h = 0x811c9dc5;
@@ -150,17 +185,23 @@ function hashKey(s: string): string {
 }
 
 /**
- * The tokeniser. Lowercases, splits on non-word chars, keeps tokens of length >= 3 not in STOP,
- * and produces both unigrams and adjacent bigrams. Bigrams catch multi-word concepts ("rainy day",
- * "cold coffee") that a pure unigram bag would smear. Unicode word chars only (no letters flag → we
- * do not use `\w` because it would strip CJK; we use code-point category heuristics instead).
+ * The tokeniser. Lowercases, splits on non-word chars, keeps latin tokens of length >= 3 not in
+ * STOP, and produces both unigrams and adjacent bigrams. Bigrams catch multi-word concepts
+ * ("rainy day", "cold coffee") that a pure unigram bag would smear. Unicode word chars only (no
+ * letters flag → we do not use `\w` because it would strip CJK; we use code-point category
+ * heuristics instead).
+ *
+ * CJK is not space-delimited, so it takes its own path: consecutive CJK chars accumulate into a RUN
+ * which is handed to a real dictionary-based WORD SEGMENTER (`segmentCJK`, the jieba algorithm via
+ * segmentit) — it outputs actual word boundaries like 你好|世界, not character n-grams. Segmenter
+ * output drops CJK_PARTICLES; single-char content words (爱, 猫) are kept like any other word.
  */
 export function tokenise(text: string): string[] {
 	const lower = text.toLowerCase();
 	// Split on anything that is not a Unicode letter, digit, or a CJK ideograph.
-	// CJK is not space-delimited; for simplicity we treat every CJK char as its own token.
 	const unigrams: string[] = [];
 	const buf: string[] = [];
+	const cjkRun: string[] = [];
 	const flush = (): void => {
 		if (buf.length === 0) return;
 		const w = buf.join("");
@@ -168,6 +209,11 @@ export function tokenise(text: string): string[] {
 		if (w.length < MIN_TOKEN_LEN) return;
 		if (STOP.has(w)) return;
 		unigrams.push(w);
+	};
+	const flushCjk = (): void => {
+		if (cjkRun.length === 0) return;
+		unigrams.push(...segmentCJK(cjkRun.join("")));
+		cjkRun.length = 0;
 	};
 	const isWord = (cp: number): boolean =>
 		// ASCII letters/digits + Latin-1 letters + Greek/Cyrillic + general letters
@@ -186,13 +232,18 @@ export function tokenise(text: string): string[] {
 		(cp >= 0x20000 && cp <= 0x2ebef); // ext B-F
 	for (const ch of lower) {
 		const cp = ch.codePointAt(0) ?? 0;
-		if (isWord(cp)) buf.push(ch);
-		else if (isCJK(cp)) {
+		if (isWord(cp)) {
+			flushCjk();
+			buf.push(ch);
+		} else if (isCJK(cp)) {
 			flush();
-			// Each CJK char is its own unigram; bigrams handled below.
-			unigrams.push(ch);
-		} else flush();
+			cjkRun.push(ch);
+		} else {
+			flushCjk();
+			flush();
+		}
 	}
+	flushCjk();
 	flush();
 	// Bigrams from adjacent unigrams.
 	const out: string[] = [...unigrams];
@@ -227,8 +278,9 @@ interface EncodeArgs {
 	text: string;
 	pad: { p: number; a: number; d: number };
 	t: number;
-	/** Optional sealed-entry id to attach to episode keys (used for journal-style memories). */
-	sealed?: string;
+	/** The thought is the companion's own private note; private nodes participate in recall but are
+	 * excluded from the user-visible summary. */
+	private?: boolean;
 	/** Cap on how many distinct node keys this episode touches. */
 	maxKeys?: number;
 }
@@ -281,7 +333,7 @@ export function encode(g: MemoryGraph, args: EncodeArgs): MemoryGraph {
 				pad,
 				count: prev.count + 1,
 				t: args.t,
-				sealed: prev.sealed ?? args.sealed,
+				private: prev.private ?? args.private,
 			};
 		} else {
 			nodes[k] = {
@@ -292,7 +344,7 @@ export function encode(g: MemoryGraph, args: EncodeArgs): MemoryGraph {
 				pad: { ...args.pad },
 				count: 1,
 				t: args.t,
-				sealed: args.sealed,
+				private: args.private,
 			};
 		}
 	}
@@ -313,9 +365,10 @@ export function encode(g: MemoryGraph, args: EncodeArgs): MemoryGraph {
 		}
 	}
 
-	const episodes = [...g.episodes, { t: args.t, text: trim(args.text, 120), keys, pad: { ...args.pad } }].slice(
-		-EPISODE_RING,
-	);
+	const episodes = [
+		...g.episodes,
+		{ t: args.t, text: trim(args.text, 120), keys, pad: { ...args.pad }, private: args.private === true },
+	].slice(-EPISODE_RING);
 	return {
 		...g,
 		nodes,
@@ -323,13 +376,6 @@ export function encode(g: MemoryGraph, args: EncodeArgs): MemoryGraph {
 		episodes,
 		counters: { ...g.counters, encoded: g.counters.encoded + 1 },
 	};
-}
-
-/** Attach a sealed-entry id to a node by key. Returns the graph unchanged if the key isn't there. */
-export function attachSealed(g: MemoryGraph, key: string, sealedId: string): MemoryGraph {
-	const n = g.nodes[key];
-	if (!n) return g;
-	return { ...g, nodes: { ...g.nodes, [key]: { ...n, sealed: sealedId } } };
 }
 
 /**
@@ -359,7 +405,6 @@ export interface RecallHit {
 	pad: { p: number; a: number; d: number };
 	strength: number;
 	salience: number;
-	sealed?: string;
 }
 
 /** How retrievable a node is right now: time-decayed strength plus a slice of its short-term trace. */
@@ -436,7 +481,6 @@ export function recall(g: MemoryGraph, opts: RecallOptions): RecallHit[] {
 				pad: n?.pad ?? { p: 0, a: 0, d: 0 },
 				strength: n?.strength ?? 0,
 				salience: n?.salience ?? 0,
-				sealed: n?.sealed,
 			};
 		})
 		.sort((a, b) => b.score - a.score || (a.key < b.key ? -1 : 1))
@@ -447,8 +491,8 @@ export function recall(g: MemoryGraph, opts: RecallOptions): RecallHit[] {
  * The testing effect (ACT-R: a successful retrieval raises base-level activation; the
  * generation/testing effect in the memory literature). `recall` is pure, so this is the companion
  * side-effect the host applies to whatever surfaced: recalled nodes get a little stickier and their
- * decay clock restarts. A fact you keep pulling up persists; one you never retrieve fades — which is
- * exactly the balance the user asked about ("遗忘和记忆的关系"). Not a blanket bonus: bounded, so a
+ * decay clock restarts. A fact you keep pulling up persists; one you never retrieve fades — that is
+ * the remembering/forgetting balance this module exists to strike. Not a blanket bonus: bounded, so a
  * trivia node recalled a hundred times still can't outrank a core memory that is also rehearsed.
  */
 export function rehearse(g: MemoryGraph, keys: string[], now: number): MemoryGraph {
@@ -523,7 +567,9 @@ export function consolidate(g: MemoryGraph, now: number): MemoryGraph {
  * A terse, STABLE rendering for the cached system-prompt prefix. Deliberately small and slow to
  * change so prompt caching holds. Emits: top N nodes by strength, their top edges (as "a ~ b"),
  * and one line for the most recent episode. Not the same thing as `recall` — recall is per-turn
- * and volatile; the summary is per-forever and lives in the cacheable prefix.
+ * and volatile; the summary is per-forever and lives in the cacheable prefix. Private nodes are
+ * excluded from the top-node listing: they still count for edges, recall, rehearse and consolidate,
+ * but this block is user-visible, so the companion's private notes never render into it.
  *
  * `lang` labels the three lines only. Node order, strengths and edge weights are untouched, so a
  * Chinese companion remembers exactly what the English one does.
@@ -537,10 +583,14 @@ export function summary(
 	const topN = opts.nodes ?? 12;
 	const topE = opts.edges ?? 10;
 	const nodeKeys = Object.values(g.nodes)
+		.filter((n) => n.private !== true)
 		.sort((a, b) => b.strength - a.strength || (a.key < b.key ? -1 : 1))
 		.slice(0, topN)
 		.map((n) => `${n.label}:${n.strength.toFixed(2)}`);
 	const edgeLines = [...g.edges]
+		// An edge is user-visible only if BOTH endpoints are: a tie touching a private node would
+		// otherwise print that node's label and leak the private note into the cached prefix.
+		.filter((e) => g.nodes[e.a]?.private !== true && g.nodes[e.b]?.private !== true)
 		.sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight) || (a.a < b.a ? -1 : 1))
 		.slice(0, topE)
 		.map((e) => {
@@ -553,7 +603,7 @@ export function summary(
 	if (nodeKeys.length) lines.push(kv(L.memoryNodes, nodeKeys.join(L.sep), lang));
 	if (edgeLines.length) lines.push(kv(L.memoryTies, edgeLines.join(" | "), lang));
 	const recent = g.episodes[g.episodes.length - 1];
-	if (recent) lines.push(kv(L.memoryRecent, trim(recent.text, 90), lang));
+	if (recent && recent.private !== true) lines.push(kv(L.memoryRecent, trim(recent.text, 90), lang));
 	if (lines.length === 0) return "";
 	const body = `<mate-memory>\n${lines.join("\n")}\n</mate-memory>`;
 	const max = opts.maxChars ?? 900;
@@ -650,7 +700,7 @@ export function sanitiseMemory(raw: unknown): MemoryGraph {
 				},
 				count: typeof n.count === "number" ? n.count : 1,
 				t: typeof n.t === "number" ? n.t : 0,
-				sealed: typeof n.sealed === "string" ? n.sealed : undefined,
+				private: n.private === true,
 			};
 		}
 	}
@@ -660,7 +710,9 @@ export function sanitiseMemory(raw: unknown): MemoryGraph {
 				.map((e) => ({ ...e }))
 		: [];
 	const episodes = Array.isArray(r.episodes)
-		? r.episodes.filter((e) => e && typeof e.t === "number" && typeof e.text === "string" && Array.isArray(e.keys))
+		? r.episodes
+				.filter((e) => e && typeof e.t === "number" && typeof e.text === "string" && Array.isArray(e.keys))
+				.map((e) => ({ ...e, private: (e as { private?: unknown }).private === true }))
 		: [];
 	return {
 		version: typeof r.version === "number" ? r.version : 1,

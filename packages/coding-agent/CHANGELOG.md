@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added the `ponder` tool (model-only, hidden in the TUI): the companion's private thoughts are folded into the memory graph with the private flag, coloured by current mood, and never rendered to the user.
+- Discovered reach-out channels recorded via `feel` are now also written into the memory graph as private memories, so they survive a restart.
+
+### Changed
+
+- `feel` lost its `note` parameter (private thoughts belong to `ponder`) and its acknowledgement is a single word rendered invisibly; the old repeated visible ack text was removed.
+- Release archives carry the repo-root MATE README instead of upstream pi's.
+
+### Removed
+
+- Removed the encrypted sealed self: `secret.ts`, `sealed.json`, and the machine-bound key are gone, along with the `sealed`/`foreign` fields of the persisted store.
+
 ## [1.0.0] - 2026-10-01
 
 ### New Features

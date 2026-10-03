@@ -12,9 +12,13 @@ const developmentPackages = new Set(["pi-client", "pi-protocol", "pi-server"].ma
 
 function run(command, args, options = {}) {
 	console.log(`$ ${[command, ...args].join(" ")}`);
-	const result = spawnSync(command, args, {
+	// On Windows the shell joins command + args into one line, so any path containing a space
+	// (e.g. "C:\Program Files\nodejs\node.exe") must be quoted or it splits at the space.
+	const useShell = process.platform === "win32";
+	const quote = (part) => (useShell && /\s/.test(part) ? `"${part}"` : part);
+	const result = spawnSync(quote(command), args.map((arg) => quote(arg)), {
 		encoding: "utf8",
-		shell: process.platform === "win32",
+		shell: useShell,
 		timeout: 300_000,
 		...options,
 	});

@@ -12,6 +12,11 @@
  *      English instead of throwing.
  */
 
+// Pin the test process to UTC before anything renders: the projection's clock line
+// ("now 17:00") reads the LOCAL hour, so a snapshot taken in one timezone would fail on
+// any other machine. UTC is the fixed reference the snapshot is regenerated against.
+process.env.TZ = "UTC";
+
 import { describe, expect, it } from "vitest";
 import { birth } from "../src/birth.ts";
 import { minimalContext, stableContext, stateContext } from "../src/context.ts";
@@ -73,7 +78,7 @@ function render(lang: "en" | "zh") {
 		stateContext(state, { now: NOW, tz: "UTC", lang, inclination: incl, session: "" }),
 		minimalContext(state, { now: NOW, tz: "UTC", lang }),
 		generateThoughts(state, NOW, emptyMemory(), lang)
-			.map((t) => t.text)
+			.map((t) => t.thought.text)
 			.join("\n"),
 		incl.reason,
 		fmtDurLong(3 * HOUR + 12 * 60_000, lang),

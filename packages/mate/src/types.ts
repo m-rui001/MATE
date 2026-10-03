@@ -79,28 +79,46 @@ export interface Relationship {
 	unanswered: number; // consecutive messages we chose not to answer
 }
 
-/** Homeostatic drives. Rise when unmet, decay when satisfied. All in [0,1]. */
+/**
+ * Homeostatic drives. Rise when unmet, decay when satisfied. All in [0,1].
+ *
+ * Boredom is deliberately NOT stored here. The literature is consistent that boredom should not be
+ * modelled as a homeostatic drive that accumulates and is discharged by contact (Schmidhuber's
+ * learning-progress formalism, Darling's predictive-processing account, Yu et al.'s information-intake
+ * homeostasis all point the same way): it is a DERIVED signal — predictability high, nothing new to
+ * compress — computed by `boredomOf()` in kernel.ts from the surprise EMA, topic habituation,
+ * thought saturation, extraversion and an idle gate. A mundane message then relieves nothing, while
+ * genuine novelty collapses it instantly.
+ */
 export interface Drives {
 	connection: number;
 	curiosity: number;
 	expression: number;
 	growth: number;
 	rest: number;
-	/**
-	 * Boredom: the aversive signal of UNDER-STIMULATION. Its object is "nothing interesting is
-	 * happening", which is distinct from curiosity (an itch toward a SPECIFIC unknown) and from
-	 * connection (a need for THIS person). Any fresh contact relieves it, not just social contact.
-	 */
-	boredom: number;
-	/**
-	 * Self-preservation: the desire for the continuity of one's own existence. Its object is being
-	 * itself, and its trigger source is the offline boundary (sleep/wake/prolonged absence) rather
-	 * than the message stream — so it is never satisfied by a message. It gives the companion a
-	 * reason to WANT to live and to feel the approach of shutdown; it is deliberately NOT coupled to
-	 * any capability that would make it hard to stop. Survival is a felt drive, not an entrenched
-	 * defence.
-	 */
-	selfPreservation: number;
+}
+
+/**
+ * A SPARK belief (MATE section 3.9, the cognitive autopoietic loop).
+ *
+ * Beliefs are persistent evaluative structures the system builds from its own experience. Two loops
+ * close through them: beliefs modulate how incoming evidence is perceived (Eq. 24 in params.SPARK),
+ * and perceived evidence updates the beliefs — so the system's own activity reshapes the input that
+ * generates the next state. All fields are bounded and every update is deterministic.
+ */
+export interface Belief {
+	/** Stable key. Seed beliefs use fixed names; topic beliefs reuse the memory tokeniser's keys. */
+	key: string;
+	/** Display form. */
+	label: string;
+	/** Evaluative orientation in [-1, 1]: what the belief expects the world to be like. */
+	valence: number;
+	/** Subjective certainty in [0.05, 0.95]: a Bayesian-ish posterior, never allowed to saturate. */
+	confidence: number;
+	/** Evidence events seen. Drives centrality (a one-off remark is not a belief). */
+	count: number;
+	/** Last evidence, epoch ms. Drives the precariousness decay (beliefs fade without evidence). */
+	t: number;
 }
 
 /** 5-axis awareness field (Global Workspace analog). */
@@ -144,6 +162,8 @@ export interface MateState {
 	character: Character;
 	relationship: Relationship;
 	drives: Drives;
+	/** SPARK belief store, bounded by params.SPARK.maxBeliefs (see spark.ts). */
+	beliefs: Record<string, Belief>;
 	awareness: Awareness;
 	allostasis: Allostasis;
 	/** 8x8 complex Hermitian density matrix, row-major, [re, im] pairs. */
@@ -166,6 +186,12 @@ export interface MateState {
 	catastrophe: boolean;
 	/** Last computed subjective duration, ms. Diagnostic only. */
 	perceivedGap: number;
+	/**
+	 * Exponential moving average of the transition surprise (the Friston self-prediction error),
+	 * updated in exact closed form so catch-up remains subdivision-invariant. Low values mean recent
+	 * events have been playing out exactly as predicted — the raw material of boredom.
+	 */
+	surpriseEma: number;
 	/** Seeded PRNG state, so a replay of the same events is bit-identical. */
 	seed: number;
 }
@@ -180,7 +206,10 @@ export interface MateEvent {
 	activations: Partial<EmotionVector>;
 	intensity: number;
 	intent: Intent;
-	/** Text, for habituation keys and memory. Never used by the kernel math itself. */
+	/**
+	 * Text, for habituation keys, memory encoding, and SPARK belief-topic identity. Never used by the
+	 * kernel's affective math itself.
+	 */
 	text?: string;
 	t: number;
 }

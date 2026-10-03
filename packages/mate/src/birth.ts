@@ -8,6 +8,7 @@
 
 import { fromEmotions, identity } from "./quantum.ts";
 import { clamp01, drawMany } from "./rng.ts";
+import { sanitiseBeliefs, seedBeliefStore } from "./spark.ts";
 import type { Awareness, Character, Drives, MateState, Personality, Relationship } from "./types.ts";
 
 const NEUTRAL_CHARACTER: Character = {
@@ -95,8 +96,6 @@ export function birth(opts: BirthOptions = {}): MateState {
 		expression: 0.15,
 		growth: 0.3,
 		rest: 0.1,
-		boredom: 0.15,
-		selfPreservation: 0.1,
 	};
 
 	const rho = Object.values(emotions).every((v) => v === 0) ? identity() : fromEmotions(emotions, seed);
@@ -114,6 +113,7 @@ export function birth(opts: BirthOptions = {}): MateState {
 		character: { ...NEUTRAL_CHARACTER, ...opts.character },
 		relationship,
 		drives,
+		beliefs: seedBeliefStore(),
 		awareness,
 		allostasis: { fatigue: 0, load: 0, baselineShift: { p: 0, a: 0, d: 0 } },
 		rho,
@@ -130,6 +130,7 @@ export function birth(opts: BirthOptions = {}): MateState {
 		},
 		catastrophe: false,
 		perceivedGap: 0,
+		surpriseEma: 0,
 		seed,
 	};
 }
@@ -168,13 +169,24 @@ export function sanitiseState(raw: unknown, opts: BirthOptions = {}): MateState 
 		personality: { ...fresh.personality, ...(r.personality ?? {}) },
 		character: { ...fresh.character, ...(r.character ?? {}) },
 		relationship: { ...fresh.relationship, ...(r.relationship ?? {}) },
-		drives: { ...fresh.drives, ...(r.drives ?? {}) },
+		// Drives are picked key-by-key, never spread: a state.json written by an older build carries
+		// removed drive fields (boredom, selfPreservation), and a spread would resurrect them as stale
+		// keys that every Object.entries-driven render would then display.
+		drives: {
+			connection: num(r.drives?.connection, fresh.drives.connection),
+			curiosity: num(r.drives?.curiosity, fresh.drives.curiosity),
+			expression: num(r.drives?.expression, fresh.drives.expression),
+			growth: num(r.drives?.growth, fresh.drives.growth),
+			rest: num(r.drives?.rest, fresh.drives.rest),
+		},
+		beliefs: sanitiseBeliefs(r.beliefs),
 		awareness: { ...fresh.awareness, ...(r.awareness ?? {}) },
 		allostasis: { ...fresh.allostasis, ...(r.allostasis ?? {}) },
 		habituation: r.habituation && typeof r.habituation === "object" ? r.habituation : {},
 		observations: Array.isArray(r.observations) ? r.observations.filter((x) => typeof x === "string") : [],
 		counters: { ...fresh.counters, ...(r.counters ?? {}) },
 		catastrophe: typeof r.catastrophe === "boolean" ? r.catastrophe : false,
+		surpriseEma: num(r.surpriseEma, 0),
 		seed: num(r.seed, fresh.seed),
 	} as MateState;
 	// rho is repaired by the quantum module on load.

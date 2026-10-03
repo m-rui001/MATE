@@ -1090,10 +1090,13 @@ export function createProvider<TApi extends Api = Api>(input: CreateProviderOpti
 							.filter((model) => model.provider === input.id)
 							// Models persisted by an older version may lack fields newer code assumes
 							// present (e.g. `input`); default before casting so a stale cache cannot crash streams.
-							.map(({ input: modelInput, ...rest }) => ({
-								...rest,
-								input: Array.isArray(modelInput) ? modelInput : ["text"],
-							}) as ProviderModel<TApi>);
+							.map(
+								({ input: modelInput, ...rest }) =>
+									({
+										...rest,
+										input: Array.isArray(modelInput) ? modelInput : ["text"],
+									}) as ProviderModel<TApi>,
+							);
 						if (
 							!(await context.publish({
 								update: () => {

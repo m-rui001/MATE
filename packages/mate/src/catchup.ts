@@ -170,7 +170,7 @@ export function catchUp(
 
 	const drives = current.drives;
 	const drivesSaturated =
-		drives.connection > 0.92 || drives.curiosity > 0.92 || drives.rest > 0.92 || drives.boredom > 0.92;
+		drives.connection > 0.92 || drives.curiosity > 0.92 || drives.rest > 0.92 || drives.expression > 0.92;
 
 	return {
 		state: current,
@@ -240,6 +240,12 @@ export function verifySubdivisionInvariance(
 	cmp("drives.connection", oneShot.drives.connection, cur.drives.connection);
 	cmp("drives.curiosity", oneShot.drives.curiosity, cur.drives.curiosity);
 	cmp("drives.rest", oneShot.drives.rest, cur.drives.rest);
+	cmp("surpriseEma", oneShot.surpriseEma, cur.surpriseEma);
+	// Beliefs decay in closed form and receive no evidence on tick events, so the store must also be
+	// subdivision-invariant across the gap.
+	for (const k of Object.keys(oneShot.beliefs)) {
+		cmp(`beliefs.${k}.confidence`, oneShot.beliefs[k].confidence, cur.beliefs[k]?.confidence ?? Number.NaN);
+	}
 	cmp("awareness.userPresence", oneShot.awareness.userPresence, cur.awareness.userPresence);
 	cmp("awareness.socialPressure", oneShot.awareness.socialPressure, cur.awareness.socialPressure);
 	cmp("allostasis.load", oneShot.allostasis.load, cur.allostasis.load);

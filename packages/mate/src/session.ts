@@ -1,9 +1,9 @@
 /**
  * Session log: the companion's awareness of being opened and closed.
  *
- * The requirement (2026-01): "META应该能知道自己什么时候被打开 什么时候被关上了这种信息" — the companion
- * should know when it was woken and when it was put to sleep, not just the affective gap between
- * messages. This is distinct from catch-up (which integrates MOOD across a powered-off gap): the
+ * The requirement behind this module: the companion should know when it was woken and when it was put
+ * to sleep, not just the affective gap between messages. This is distinct from catch-up (which
+ * integrates MOOD across a powered-off gap): the
  * session log is the autobiographical record of the contacts themselves — when this body was started
  * and stopped, how many times today, how long the last sleep ran.
  *
