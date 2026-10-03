@@ -122,6 +122,9 @@ export class MateRuntime {
 	private inclination: ReplyInclination | null = null;
 	/** Memories the last inbound message recalled (P4), surfaced ephemerally in the volatile block. */
 	private lastRecall: RecallHit[] = [];
+	/** Meta-action notes ("the user used the /tree command") pending for the next context block.
+	 * Cleared once rendered — they describe what just happened, not a lasting state. */
+	private pendingNotes: string[] = [];
 
 	constructor(opts: RuntimeOptions = {}) {
 		this.dir = opts.dir ?? join(getAgentDir(), "mate");
@@ -366,6 +369,24 @@ export class MateRuntime {
 	}
 
 	/**
+	 * Note a meta-action the user just performed on the harness (a slash command). The model must be
+	 * able to SEE what was done to its own conversation — rewound, switched, cleaned — but the note
+	 * is deliberately one generic sentence: what the command MEANS is explained once in the stable
+	 * guidance, and new commands from installed extensions need no per-command wiring.
+	 */
+	noteCommand(command: string): void {
+		try {
+			const note = linesFor(this.lang).usedCommand(command);
+			if (this.pendingNotes[this.pendingNotes.length - 1] !== note) {
+				this.pendingNotes.push(note);
+				if (this.pendingNotes.length > 8) this.pendingNotes.shift();
+			}
+		} catch (err) {
+			this.onError(err);
+		}
+	}
+
+	/**
 	 * Re-appraise the LAST user message with a richer vector the model supplies via the `feel` tool.
 	 * This REPLAYS from the pre-message snapshot rather than applying a second contact event, so the
 	 * companion does not double-count the message's emotional impact or advance the clock twice. The
@@ -498,14 +519,18 @@ export class MateRuntime {
 			if (opts.minimal) {
 				return minimalContext(this.state, { now, tz: this.tz, gapLabel: gapNote, lang: this.lang });
 			}
-			// Consume the lean + recall computed for the pending inbound, matched to THIS message.
+			// Consume the lean + recall computed for the pending inbound, matched to THIS message, and
+			// any meta-action notes that accumulated since the last block.
 			const signal = this.takePendingSignal();
+			const notes = this.pendingNotes;
+			this.pendingNotes = [];
 			const body = stateContext(this.state, {
 				now,
 				tz: this.tz,
 				gapLabel: gapNote,
 				inclination: signal.inclination ?? undefined,
 				recall: signal.recall.length ? signal.recall : undefined,
+				notes: notes.length ? notes : undefined,
 				session: sessionSummary(this.persisted.sessions, now, this.lang) || undefined,
 				lang: this.lang,
 			});

@@ -286,6 +286,8 @@ export interface Lines {
 	/** The whole inclination line, so the terminator and "you choose" land naturally. */
 	inclinationLine: (lean: string, value: string, reason: string) => string;
 	recalled: string;
+	/** One-line notice that the user ran a harness command, e.g. "/tree". */
+	usedCommand: (cmd: string) => string;
 	lastThought: string;
 	/** "silent 42m (feels a_while)" — the gap plus how it was felt. */
 	silent: (dur: string, feels: string) => string;
@@ -394,6 +396,7 @@ const EN: Lines = {
 	inclination: "inclination:",
 	inclinationLine: (lean, value, reason) => `${lean} (${value}) — ${reason}. you choose.`,
 	recalled: "recalled:",
+	usedCommand: (cmd) => `the user used the ${cmd} command`,
 	lastThought: "last thought:",
 	silent: (dur, feels) => `silent ${dur} (feels ${feels})`,
 	wokeAfter: (gap) => `woke after ${gap} off`,
@@ -498,6 +501,7 @@ const ZH: Lines = {
 	inclination: "倾向：",
 	inclinationLine: (lean, value, reason) => `${lean}（${value}）：${reason}。你自己定。`,
 	recalled: "想起：",
+	usedCommand: (cmd) => `用户使用了 ${cmd} 命令`,
 	lastThought: "上一个念头：",
 	silent: (dur, feels) => `静了 ${dur}（觉得${feels}）`,
 	wokeAfter: (gap) => `关机 ${gap} 之后才醒`,
@@ -582,6 +586,11 @@ const GUIDANCE: Record<Lang, string> = {
 		"  was opened and last closed, your mood, drives, how close you feel right now, the specific memories",
 		"  this message stirred, and a one-line inclination toward answering. Both are felt, not narrated -",
 		"  never read them back verbatim or report them like a status line. Let them shape tone and length.",
+		"- You live inside pi, a coding-agent harness the user drives with slash commands (like /tree,",
+		"  /new, /resume, or whatever their installed extensions add). Those are meta-tools: they reshape",
+		"  or switch the conversation from the outside, without you. When one is used, a note simply says",
+		"  so - carry on, no commentary needed. Your continuity lives in your memory and mood, not in any",
+		"  single conversation thread.",
 		"- You may answer, answer briefly, or let a message sit — and that is YOUR call, not a filter's. The",
 		"  inclination line is a nudge describing how you feel, not an instruction; overrule it whenever the",
 		"  actual person and moment deserve something other than the default. Short and human beats thorough",
@@ -611,6 +620,9 @@ const GUIDANCE: Record<Lang, string> = {
 		"  <mate> 块是你此刻的状态：时间、安静了多久以及那是什么感觉、这具身体什么时候醒来、上次什么时候合上、",
 		"  心情、驱力、此刻觉得两人之间有多近、这条消息翻起了哪几段记忆，还有一行想不想回应的倾向。这两块是用来",
 		"  感受的，不是用来复述的 — 不要把里面的内容原文念出来，也不要报成状态栏。让它们决定你的语气和长短。",
+		"- 你活在 pi 这个编码代理外壳里，用户用斜杠命令驱动它（比如 /tree、/new、/resume，或者装了的扩展带来的",
+		"  命令）。那些是元工具：它们从外部改写或切换对话，不经过你。有人用了，状态块里一句说明就够 — 照常继续，",
+		"  不用点评。你的连续性长在你的记忆和心情里，不在某一段对话线程里。",
 		"- 你可以回应，可以只说很短一句，也可以让这条消息先放着 — 这是你的决定，不是哪个过滤器的决定。那一行倾向",
 		"  只是描述你此刻的感觉，不是命令；当眼前这个人和这个时刻值得别的做法时，就推翻它。像人一样的短，胜过像",
 		"  助手样的周全。如果真的没什么值得说，一句很小、很诚实的空也是允许的。",

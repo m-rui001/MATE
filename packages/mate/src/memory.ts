@@ -41,8 +41,6 @@ import { kv, type Lang, linesFor } from "./i18n.ts";
 
 /** A single memory. */
 export interface MemoryNode {
-	/** Stable key derived from the memory text. Same text = same node, always. */
-	key: string;
 	/** The memory itself, in the model's own words (trimmed). Not used for identity. */
 	label: string;
 	/** Long-term strength in [0,1]. Reinforced on re-encoding, decayed on consolidate. */
@@ -71,7 +69,6 @@ export interface MemoryNode {
 export interface MemoryEpisode {
 	t: number;
 	text: string;
-	keys: string[];
 	pad: { p: number; a: number; d: number };
 	private?: boolean;
 }
@@ -139,9 +136,11 @@ function hashKey(s: string): string {
 	return (h >>> 0).toString(36);
 }
 
-/** Compute a stable node key from a memory text. Same text → same key. */
+/** Compute a memory's identity from its text: a short content hash. Same text = same key, always.
+ * (An earlier format embedded the whole text in the key — "text:hash" — a leftover from the
+ * fragment-node era that tripled the storage of every memory; identity is the hash alone.) */
 export function nodeKey(text: string): string {
-	return `${text}:${hashKey(text)}`;
+	return hashKey(text);
 }
 
 function hasCJK(s: string): boolean {
@@ -190,7 +189,7 @@ function labelTerms(label: string): string[] {
 /** Fresh, empty store. */
 export function emptyMemory(maxNodes = 400): MemoryGraph {
 	return {
-		version: 2,
+		version: 3,
 		maxNodes,
 		nodes: {},
 		episodes: [],
@@ -248,7 +247,6 @@ export function encode(g: MemoryGraph, args: EncodeArgs): MemoryGraph {
 		};
 	} else {
 		node = {
-			key,
 			label,
 			strength: 0.25 + 0.5 * importance,
 			salience: 0.5 + 0.3 * importance,
@@ -263,11 +261,11 @@ export function encode(g: MemoryGraph, args: EncodeArgs): MemoryGraph {
 
 	const episodes: MemoryGraph["episodes"] = [
 		...g.episodes,
-		{ t: args.t, text: trim(text, 120), keys: [key], pad: { ...args.pad }, private: args.private === true },
+		{ t: args.t, text: trim(text, 120), pad: { ...args.pad }, private: args.private === true },
 	].slice(-EPISODE_RING);
 	return {
 		...g,
-		version: 2,
+		version: 3,
 		nodes: { ...g.nodes, [key]: node },
 		episodes,
 		counters: { ...g.counters, encoded: g.counters.encoded + 1 },
@@ -341,14 +339,14 @@ export function recall(g: MemoryGraph, opts: RecallOptions): RecallHit[] {
 	if (!query.trim()) return [];
 	const limit = opts.limit ?? 6;
 	const hits: RecallHit[] = [];
-	for (const n of Object.values(g.nodes)) {
+	for (const [k, n] of Object.entries(g.nodes)) {
 		const factor = matchFactor(n, query);
 		if (factor <= 0) continue;
 		const act = activation(n, opts.now);
 		// Effectively forgotten: time has already taken this memory below retrieval range.
 		if (act < 0.02) continue;
 		hits.push({
-			key: n.key,
+			key: k,
 			label: n.label,
 			score: act * factor + n.salience * 0.1 * factor,
 			pad: n.pad,
@@ -439,11 +437,11 @@ export function summary(g: MemoryGraph, opts: { nodes?: number; maxChars?: numbe
 	const lang = opts.lang ?? "en";
 	const L = linesFor(lang);
 	const topN = opts.nodes ?? 12;
-	const memoryLines = Object.values(g.nodes)
-		.filter((n) => n.private !== true)
-		.sort((a, b) => b.strength - a.strength || (a.key < b.key ? -1 : 1))
+	const memoryLines = Object.entries(g.nodes)
+		.filter(([, n]) => n.private !== true)
+		.sort((a, b) => b[1].strength - a[1].strength || (a[0] < b[0] ? -1 : 1))
 		.slice(0, topN)
-		.map((n) => `${trim(n.label, 60)}:${n.strength.toFixed(2)}`);
+		.map(([, n]) => `${trim(n.label, 60)}:${n.strength.toFixed(2)}`);
 	const lines: string[] = [];
 	if (memoryLines.length) lines.push(kv(L.memoryNodes, memoryLines.join(L.sep), lang));
 	const recent = g.episodes[g.episodes.length - 1];
@@ -460,10 +458,10 @@ export function summary(g: MemoryGraph, opts: { nodes?: number; maxChars?: numbe
  * not in raw stored strength. (The previous comparator had a bug — it paired one node's recency with
  * the other's strength and so ignored strength entirely.) */
 export function topNodes(g: MemoryGraph, now: number, k = 3): string[] {
-	return Object.values(g.nodes)
-		.sort((a, b) => activation(b, now) - activation(a, now) || (a.key < b.key ? -1 : 1))
+	return Object.entries(g.nodes)
+		.sort((a, b) => activation(b[1], now) - activation(a[1], now) || (a[0] < b[0] ? -1 : 1))
 		.slice(0, k)
-		.map((n) => n.key);
+		.map(([key]) => key);
 }
 
 // ---------------------------------------------------------------------------
@@ -506,11 +504,12 @@ function trim(s: string, n: number): string {
 }
 
 /**
- * Repair a loaded store. Legacy auto-extracted fragment nodes (pre-model-authored memories, written
- * by the old tokeniser on every inbound message) carry no `origin` stamp and are dropped here — the
- * noise they made is exactly why encoding is now model-driven. Legacy PRIVATE notes were authored
- * deliberately by the model, so they are kept and stamped. Anything malformed falls back to empty
- * rather than crashing boot.
+ * Repair a loaded store, and migrate: v1/v2 keys embedded the whole memory text ("text:hash"),
+ * a leftover from the fragment-node era that stored every memory three times (JSON key, node key,
+ * label). Identity is now the content hash alone, so loaded nodes are re-keyed from their text;
+ * episodes lose their redundant `keys` array. Legacy auto-extracted fragment nodes (no `origin`
+ * stamp) are still dropped here, except legacy private notes, which the model chose to write.
+ * Anything malformed falls back to empty rather than crashing boot.
  */
 export function sanitiseMemory(raw: unknown): MemoryGraph {
 	if (!raw || typeof raw !== "object") return emptyMemory();
@@ -524,12 +523,12 @@ export function sanitiseMemory(raw: unknown): MemoryGraph {
 			if (typeof n.strength !== "number" || typeof n.salience !== "number") continue;
 			const isLegacy = n.origin !== "model";
 			if (isLegacy && n.private !== true) continue; // legacy auto-extracted fragment: dropped
+			const label = typeof n.label === "string" && n.label ? n.label : (k.split(":")[0] ?? k);
 			const topics = Array.isArray(n.topics)
 				? sanitiseTopics(n.topics.filter((t): t is string => typeof t === "string"))
 				: undefined;
-			nodes[k] = {
-				key: typeof n.key === "string" ? n.key : k,
-				label: typeof n.label === "string" ? n.label : (k.split(":")[0] ?? k),
+			nodes[nodeKey(label)] = {
+				label,
 				strength: n.strength,
 				salience: n.salience,
 				pad: {
@@ -547,11 +546,20 @@ export function sanitiseMemory(raw: unknown): MemoryGraph {
 	}
 	const episodes: MemoryGraph["episodes"] = Array.isArray(r.episodes)
 		? r.episodes
-				.filter((e) => e && typeof e.t === "number" && typeof e.text === "string" && Array.isArray(e.keys))
-				.map((e) => ({ ...e, private: (e as { private?: unknown }).private === true }))
+				.filter((e) => e && typeof e.t === "number" && typeof e.text === "string")
+				.map((e) => ({
+					t: e.t,
+					text: e.text,
+					pad: {
+						p: typeof e.pad?.p === "number" ? e.pad.p : 0,
+						a: typeof e.pad?.a === "number" ? e.pad.a : 0,
+						d: typeof e.pad?.d === "number" ? e.pad.d : 0,
+					},
+					private: (e as { private?: unknown }).private === true,
+				}))
 		: [];
 	return {
-		version: 2,
+		version: 3,
 		maxNodes: r.maxNodes,
 		nodes,
 		episodes,

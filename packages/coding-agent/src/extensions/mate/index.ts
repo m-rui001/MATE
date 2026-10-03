@@ -225,24 +225,45 @@ export function createMateExtension(options: MateExtensionOptions = {}): Extensi
 		});
 
 		// ---------------------------------------------------------------------
-		// Inbound (P1): let the message THROUGH. Move the state, fold it into memory, surface a lean.
+		// Inbound (P1): let the message THROUGH. Move the state, surface a lean.
 		// No suppression here — the model decides how to respond using the state block.
 		// ---------------------------------------------------------------------
 		pi.on("input", (event) => {
 			try {
 				const text = event.text ?? "";
-				// Slash commands and empty input are not conversation; leave them alone.
-				if (!text.trim() || text.trimStart().startsWith("/")) return;
+				// Slash commands are meta-actions, not conversation: note that they happened so the model
+				// can see what the user did to its environment, and otherwise leave them alone.
+				if (text.trimStart().startsWith("/")) {
+					const name = text.trimStart().slice(1).split(/\s+/)[0];
+					if (name) rt.noteCommand(`/${name}`);
+					return;
+				}
+				if (!text.trim()) return;
 				// Only appraise interactive/RPC chat. Extension-driven prompts pass untouched.
 				if (event.source !== "interactive" && event.source !== "rpc") return;
 
-				// Move the affective state, encode the episode + recall (P4), compute the advisory lean.
+				// Move the affective state, recall (P4), compute the advisory lean.
 				// The result is stashed for the `context` handler; we still let the turn continue.
 				rt.onUserMessage(text);
 				return { action: "continue" };
 			} catch {
 				// On any failure, behave like a normal assistant: never strand the user.
 				return { action: "continue" };
+			}
+		});
+
+		// ---------------------------------------------------------------------
+		// Meta-visibility (P1): the user may rewind, fork, switch or otherwise drive the harness
+		// with slash commands — that is THEIR toolset, and consistency comes from memory + mood,
+		// not from hiding the tools. The model only needs to SEE what was done, so every built-in
+		// command surfaces here as one generic note (commands routed through prompt() arrive via
+		// `input` instead — no double notes).
+		// ---------------------------------------------------------------------
+		pi.on("slash_command", (event) => {
+			try {
+				rt.noteCommand(event.command);
+			} catch {
+				// Noting must never disturb the command itself.
 			}
 		});
 

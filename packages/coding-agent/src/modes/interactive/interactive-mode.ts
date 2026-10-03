@@ -177,8 +177,10 @@ import {
 import { ThemedText } from "./components/themed-text.ts";
 import { ThinkingSelectorComponent } from "./components/thinking-selector.ts";
 import { ToolExecutionComponent } from "./components/tool-execution.ts";
+import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
+import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
 import { editInExternalEditor } from "./external-editor.ts";
 import { refreshModelCatalogs } from "./model-catalog-refresh.ts";
 import { getModelSearchText } from "./model-search.ts";
@@ -3145,6 +3147,18 @@ export class InteractiveMode {
 			text = text.trim();
 			if (!text) return;
 
+			// Let extensions observe built-in slash commands (commands routed through prompt() reach
+			// the `input` event instead, so nothing is noted twice).
+			if (text.startsWith("/")) {
+				const name = text.slice(1).split(/\s+/)[0] ?? "";
+				if (BUILTIN_SLASH_COMMANDS.some((c) => c.name === name)) {
+					const args = text.slice(1 + name.length).trim();
+					void this.session.extensionRunner
+						.emit({ type: "slash_command", command: `/${name}`, args: args || undefined })
+						.catch(() => {});
+				}
+			}
+
 			// Handle commands
 			if (text === "/settings") {
 				this.showSettingsSelector();
@@ -5424,26 +5438,212 @@ export class InteractiveMode {
 		});
 	}
 
-	/** MATE: a companion's conversation is one continuous life. Rewinding it to an earlier node,
-	 * forking it from a past message, or cloning it would fracture the persona's continuity, so the
-	 * pi-native session-manipulation surfaces (/tree, /fork, /clone and the double-escape shortcut)
-	 * are disabled here. /resume stays: revisiting a past session is continuity, not a rewrite. */
-	private showSessionRewindDisabled(): void {
-		this.showWarning(
-			`Disabled in ${APP_NAME}: a conversation is one continuous life — it cannot be rewound, forked or cloned.`,
-		);
-	}
-
 	private showUserMessageSelector(): void {
-		this.showSessionRewindDisabled();
+		const userMessages = this.session.getUserMessagesForForking();
+
+		if (userMessages.length === 0) {
+			this.showStatus("No messages to fork from");
+			return;
+		}
+
+		const initialSelectedId = userMessages[userMessages.length - 1]?.entryId;
+
+		this.showSelector((done) => {
+			const selector = new UserMessageSelectorComponent(
+				userMessages.map((m) => ({ id: m.entryId, text: m.text })),
+				async (entryId) => {
+					done();
+					try {
+						const result = await this.runtimeHost.fork(entryId);
+						if (result.cancelled) {
+							this.ui.requestRender();
+							return;
+						}
+
+						this.editor.setText(result.selectedText ?? "");
+						this.showStatus("Forked to new session");
+					} catch (error: unknown) {
+						this.showError(error instanceof Error ? error.message : String(error));
+					}
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+				initialSelectedId,
+			);
+			return { component: selector, focus: selector.getMessageList() };
+		});
 	}
 
 	private async handleCloneCommand(): Promise<void> {
-		this.showSessionRewindDisabled();
+		const leafId = this.sessionManager.getLeafId();
+		if (!leafId) {
+			this.showStatus("Nothing to clone yet");
+			return;
+		}
+
+		try {
+			const result = await this.runtimeHost.fork(leafId, { position: "at" });
+			if (result.cancelled) {
+				this.ui.requestRender();
+				return;
+			}
+
+			this.editor.setText("");
+			this.showStatus("Cloned to new session");
+		} catch (error: unknown) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
 	}
 
-	private showTreeSelector(_initialSelectedId?: string): void {
-		this.showSessionRewindDisabled();
+	private showTreeSelector(initialSelectedId?: string): void {
+		const tree = this.sessionManager.getTree();
+		const realLeafId = this.sessionManager.getLeafId();
+		const initialFilterMode = this.settingsManager.getTreeFilterMode();
+
+		if (tree.length === 0) {
+			this.showStatus("No entries in session");
+			return;
+		}
+
+		this.showSelector((done) => {
+			const selector = new TreeSelectorComponent(
+				tree,
+				realLeafId,
+				this.ui.terminal.rows,
+				async (entryId) => {
+					// Selecting the current leaf is a no-op (already there)
+					if (entryId === this.sessionManager.getLeafId()) {
+						done();
+						this.showStatus("Already at this point");
+						return;
+					}
+
+					// Ask about summarization
+					done(); // Close selector first
+
+					// Loop until user makes a complete choice or cancels to tree
+					let wantsSummary = false;
+					let customInstructions: string | undefined;
+
+					// Check if we should skip the prompt (user preference to always default to no summary)
+					if (!this.settingsManager.getBranchSummarySkipPrompt()) {
+						while (true) {
+							const summaryChoice = await this.showExtensionSelector("Summarize branch?", [
+								"No summary",
+								"Summarize",
+								"Summarize with custom prompt",
+							]);
+
+							if (summaryChoice === undefined) {
+								// User pressed escape - re-show tree selector with same selection
+								this.showTreeSelector(entryId);
+								return;
+							}
+
+							wantsSummary = summaryChoice !== "No summary";
+
+							if (summaryChoice === "Summarize with custom prompt") {
+								customInstructions = await this.showExtensionEditor("Custom summarization instructions");
+								if (customInstructions === undefined) {
+									// User cancelled - loop back to summary selector
+									continue;
+								}
+							}
+
+							// User made a complete choice
+							break;
+						}
+					}
+
+					// The user committed to navigating: stop the active response first.
+					if (this.session.isStreaming) {
+						this.restoreQueuedMessagesToEditor();
+						await this.session.abort();
+					}
+
+					// Recheck after the dialogs and streaming abort, before replacing another operation's UI.
+					if (this.session.isCompacting) {
+						this.showError(
+							"Wait for the current compaction or tree navigation to finish before navigating the session tree.",
+						);
+						return;
+					}
+
+					// Set up escape handler and status indicator if summarizing
+					let showingSummaryIndicator = false;
+					const originalOnEscape = this.defaultEditor.onEscape;
+
+					if (wantsSummary) {
+						this.defaultEditor.onEscape = () => {
+							this.session.abortBranchSummary();
+						};
+						this.chatContainer.addChild(new Spacer(1));
+						this.showStatusIndicator(new BranchSummaryStatusIndicator(this.ui));
+						showingSummaryIndicator = true;
+						this.ui.requestRender();
+					}
+
+					try {
+						const result = await this.session.navigateTree(entryId, {
+							summarize: wantsSummary,
+							customInstructions,
+						});
+
+						if (result.aborted) {
+							// Summarization aborted - re-show tree selector with same selection
+							this.showStatus("Branch summarization cancelled");
+							this.showTreeSelector(entryId);
+							return;
+						}
+						if (result.cancelled) {
+							this.showStatus("Navigation cancelled");
+							return;
+						}
+
+						// Update UI
+						this.chatContainer.clear();
+						this.renderInitialMessages();
+						if (result.editorText && !this.editor.getText().trim()) {
+							this.editor.setText(result.editorText);
+						}
+						this.showStatus("Navigated to selected point");
+						void this.flushCompactionQueue({ willRetry: false });
+					} catch (error) {
+						this.showError(error instanceof Error ? error.message : String(error));
+					} finally {
+						if (showingSummaryIndicator) {
+							this.clearStatusIndicator("branchSummary");
+						}
+						this.defaultEditor.onEscape = originalOnEscape;
+					}
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+				(entryId, label) => {
+					this.sessionManager.appendLabelChange(entryId, label);
+					this.ui.requestRender();
+				},
+				initialSelectedId,
+				initialFilterMode,
+			);
+			selector.onCopy = async (text) => {
+				if (!text) {
+					this.showError("Selected entry has no text to copy");
+					return;
+				}
+				try {
+					await copyToClipboard(text);
+					this.showStatus("Copied selected message to clipboard");
+				} catch (error) {
+					this.showError(error instanceof Error ? error.message : String(error));
+				}
+			};
+			return { component: selector, focus: selector };
+		});
 	}
 
 	private showSessionSelector(): void {

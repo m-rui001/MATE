@@ -262,12 +262,15 @@ unit suite (including the i18n invariants and SPARK determinism), and a full bun
   dynamics (time decay, testing effect, consolidation) are unchanged. The graph SUMMARY still lives
   in the cached prefix (P5); only the specific recalled memories ride the ephemeral tail. This still
   grounds thoughts and impulses in SOMETHING — now something the model actually chose to keep.
-- **One life, one archive; no rewinding.** Sessions live in a single global directory
-  (`~/.mate/agent/sessions/`) regardless of the working directory — the companion is one continuous
-  person, not a per-project tool; the legacy per-cwd layout is merged in on startup. The pi-native
-  `/tree`, `/fork`, `/clone` are disabled (they rewind or branch the live conversation, which
-  fractures persona continuity; double-escape included) — `pi` ecosystem compatibility is kept for
-  everything else, and `/resume` remains for revisiting the archive.
+- **One life, one archive; meta-commands are visible, not forbidden.** Sessions live in a single
+  global directory (`~/.mate/agent/sessions/`) regardless of the working directory — the companion
+  is one continuous person, not a per-project tool; the legacy per-cwd layout is merged in on
+  startup. The pi-native commands (`/tree`, `/fork`, `/clone`, `/new`, `/resume`) remain available:
+  they are the USER's meta-tools, and consistency is carried by the memory and mood modules, not by
+  hiding tools. What the model gets is visibility: a new core `slash_command` event (plus the
+  `input` path for prompt-routed commands) surfaces every command as one generic note in the next
+  state block ("the user used the /tree command"), and the stable guidance explains ONCE what the
+  harness is — deliberately without enumerating commands, so third-party extensions need no wiring.
 - **P2/P5 — cache by rate of change, not compress.** The ~73-token single projection was an information
   bottleneck; layering stable content into a cached prefix let the volatile tail get richer for free.
 - **The private-thought boundary is honest, not encrypted.** The sealed self was removed: pi's UI

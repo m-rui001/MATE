@@ -4,6 +4,17 @@
 
 ### Added
 
+- New `slash_command` extension event: fired for every built-in slash command (commands routed through `prompt()` already reach `input`), so extensions can observe the user's meta-actions.
+- Meta-visibility for the companion: every slash command surfaces as one generic line in the model's next state block ("the user used the /tree command"), and the stable guidance explains once what the pi harness is and that meta-tools reshape the conversation from the outside - deliberately without enumerating commands, so newly installed extensions need no wiring.
+
+### Changed
+
+- Re-enabled `/tree`, `/fork` and `/clone` (disabled in 1.0.2): they are the user's meta-tools, and persona consistency is carried by the memory and mood modules. The disabling notice is gone.
+
+## [1.0.2] - 2026-10-03
+
+### Added
+
 - Added the `remember` tool (model-only, hidden in the TUI): the model decides what deserves to survive, storing one memory in its own words with topic tags and an importance weight. `ponder` accepts topic tags too.
 
 ### Changed

@@ -55,6 +55,9 @@ export interface ContextOptions {
 	inclination?: ReplyInclination;
 	/** Specific memories this message recalls (P4), surfaced in the volatile tail. */
 	recall?: RecallHit[];
+	/** One-line notices about meta-actions the user just performed (e.g. ran /tree). Rendered once,
+	 * then gone — they describe what happened, not a lasting state. */
+	notes?: string[];
 	/** A one-line open/close summary for THIS body (see session.ts): when it woke, how often today. */
 	session?: string;
 	/** Max characters for the whole block; the projector trims lowest-signal channels first. */
@@ -307,6 +310,10 @@ export function stateContext(state: MateState, opts: ContextOptions = {}): strin
 			.join(L.sep);
 		lines.push(kv(L.recalled, hits, lang));
 	}
+
+	// Meta-actions the user just performed on the harness (rewound, switched, ran a command). The
+	// model sees WHAT happened; the guidance explains what it means, once.
+	for (const note of opts.notes ?? []) lines.push(note);
 
 	// The single most recent self-observation, if any: continuity of inner life across turns.
 	const lastObs = state.observations[state.observations.length - 1];

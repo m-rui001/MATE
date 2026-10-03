@@ -1134,6 +1134,19 @@ export type InputEventResult =
 	| { action: "transform"; text: string; images?: ImageContent[] }
 	| { action: "handled" };
 
+/**
+ * Fired when the user runs a built-in slash command (commands routed through `prompt()` reach the
+ * `input` event instead). Lets extensions observe the user's meta-actions on the harness — tree
+ * navigation, session switches, model changes — without interpreting them.
+ */
+export interface SlashCommandEvent {
+	type: "slash_command";
+	/** The command name as typed, with slash and without arguments: e.g. "/tree". */
+	command: string;
+	/** Everything after the command name, if any. */
+	args?: string;
+}
+
 // ============================================================================
 // Tool Events
 // ============================================================================
@@ -1355,6 +1368,7 @@ export type ExtensionEvent =
 	| ResourcesDiscoverEvent
 	| McpServersChangeEvent
 	| SessionEvent
+	| SlashCommandEvent
 	| ContextEvent
 	| ContextWithSystemEvent
 	| CacheWarmingDecisionEvent
@@ -1610,6 +1624,7 @@ export interface ExtensionAPI {
 	on(event: "tool_result", handler: ExtensionHandler<ToolResultEvent, ToolResultEventResult>): () => void;
 	on(event: "user_bash", handler: ExtensionHandler<UserBashEvent, UserBashEventResult>): () => void;
 	on(event: "input", handler: ExtensionHandler<InputEvent, InputEventResult>): () => void;
+	on(event: "slash_command", handler: ExtensionHandler<SlashCommandEvent>): () => void;
 
 	// =========================================================================
 	// Tool Registration

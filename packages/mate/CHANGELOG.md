@@ -4,6 +4,16 @@
 
 ### Breaking Changes
 
+- Memory identity is the content hash alone: the store's JSON keys no longer embed the memory text (the old `text:hash` format stored every memory three times), `MemoryNode` lost its `key` field, and episodes lost their `keys` array. Loading a v1/v2 `memory.json` migrates it in place - nodes are re-keyed from their text, so identical text still reinforces the same memory.
+
+### Changed
+
+- Store format version bumped to 3 (migration happens on load; no user action needed).
+
+## [1.0.2] - 2026-10-03
+
+### Breaking Changes
+
 - Memory is model-authored now. `encode()` stores one memory per call (text, optional topic tags, optional importance) instead of tokenising text into concept fragments; `recall()` takes `{ query, now, limit }` and matches topics/words literally instead of spreading from seed keys; `RecallHit` lost `hop`; the `MemoryEdge` type and the edges array are gone.
 - Legacy auto-extracted fragment nodes are dropped on load: `sanitiseMemory` keeps only model-authored memories (plus legacy private notes, which the model chose to write).
 

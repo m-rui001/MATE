@@ -50,8 +50,12 @@ The conversation archive lives in one place: wherever you open mate, sessions ar
 `~/.mate/agent/sessions/` (archives from the older per-directory layout are merged in on startup).
 The working-directory mode is untouched — every session still remembers where it ran, and tools
 work there — but the companion's life is one continuous stream, not a per-project filing cabinet.
-Accordingly the pi-native commands that rewind or branch a conversation (`/tree`, `/fork`,
-`/clone`) are disabled: a continuous life cannot be rewound. `/resume` stays.
+The pi-native commands stay available — `/tree`, `/fork`, `/clone`, `/new`, `/resume` are the
+USER's meta-tools, and consistency is carried by the memory and mood modules, not by hiding them.
+What the model gets instead is visibility: whenever one of those commands is used, its next state
+block carries one generic line ("the user used the /tree command"), and the stable guidance
+explains once what the harness is and that meta-tools reshape the conversation from the outside.
+The model never narrates the note; it just keeps being itself across the discontinuity.
 
 The stored drives are `connection`, `curiosity`, `expression`, `growth`, and `rest` — five. `boredom`
 is no longer one of them: it is derived each tick from a recent-surprise average, topic
@@ -255,7 +259,7 @@ MATE 保留了 pi 的能力（bash、MCP、自安装扩展、整个代理核心�
 
 记忆不是自动写入的。没有任何分词器把你的每句话切成概念碎片存进图谱——那个设计只会积累「试试看」「感觉」这样的噪音。值得留下什么，由模型在自己的回合里决定：`remember` 工具存一条它选择保留的记忆（一句它自己的话，附上几个主题标签，比如 `面试` 或 `work`），`ponder` 存私密的那一类。回忆按主题字面匹配（词边界检查，不是近似分词），所以一条没打标签的中文记忆可能永远不会自己浮上来——打标签是它自己的责任。遗忘遵循 ACT-R：强度随真实流逝时间衰减，回忆一条记忆会强化它，情绪强烈的记忆消退得更慢，睡眠会巩固记忆。完整机制在 `packages/mate/src/memory.ts`。
 
-对话档案也只有一个地方：无论从哪个目录打开 mate，会话都存在 `~/.mate/agent/sessions/` 下（旧版按目录分存的档案会在启动时自动并入）。工作目录模式保留——每个会话仍记得它运行在哪里，工具也在那里工作——但伴侣的人生是一段连续的流水，不是一个按项目分文件夹的档案。相应地，`/tree`、`/fork`、`/clone` 这些把对话退回某个节点或另开分支的原生命令被禁用：连续的人生不能倒带。`/resume` 保留。
+对话档案也只有一个地方：无论从哪个目录打开 mate，会话都存在 `~/.mate/agent/sessions/` 下（旧版按目录分存的档案会在启动时自动并入）。工作目录模式保留——每个会话仍记得它运行在哪里，工具也在那里工作——但伴侣的人生是一段连续的流水，不是一个按项目分文件夹的档案。pi 的原生命令全部可用——`/tree`、`/fork`、`/clone`、`/new`、`/resume` 是用户的元工具，人格一致性由记忆和情绪模块承载，而不是靠藏起工具。模型得到的是可见性：每当你用了这类命令，它的下一个状态块里会多一句通用说明（"用户使用了 /tree 命令"）；稳定引导里也一次性解释了这个外壳是什么、元工具会从外部改写对话。模型不会去点评这句说明，它只是在断层之后继续做自己。
 
 存储的驱力有五个：`connection`、`curiosity`、`expression`、`growth` 和 `rest`。`boredom` 不再是其中之一：它每步都从近期意外均值、话题习惯化、想法饱和度、外向性和一个空闲门（信息摄入亏空）推导出来（Schmidhuber 1991、Darling 2023、Yu et al. 2019）。缓解来自新颖而不是接触本身，所以一句平淡的 `ok` 几乎缓解不了什么。旧的 `selfPreservation` 驱力已移除。它们是动机，不是工具。它们改变模型想做什么，但不增加它能做什么。
 

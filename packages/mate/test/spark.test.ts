@@ -143,13 +143,13 @@ describe("SPARK: the loop through the kernel", () => {
 		s = transition(s, warmEvent(s.t + HOUR, "聊到了下周的面试", ["面试"]), HOUR).state;
 		const topicKeys = Object.keys(s.beliefs).filter((k) => k !== "othersTrustworthy" && k !== "worldSafety");
 		expect(topicKeys).toEqual(["面试"]);
-		expect(s.beliefs["面试"].confidence).toBe(SPARK.topicSeedConfidence);
+		expect(s.beliefs.面试.confidence).toBe(SPARK.topicSeedConfidence);
 	});
 
 	it("feeds evidence to a topic belief when its subject appears in the message text", () => {
 		let s = birth({ seed: 6, born: 0 });
 		s = transition(s, warmEvent(HOUR, undefined, ["面试"]), HOUR).state;
-		const before = s.beliefs["面试"];
+		const before = s.beliefs.面试;
 		expect(before).toBeDefined();
 		// A hostile message that literally touches the subject (word/substring match, no tokeniser)
 		// feeds the belief negative evidence: its valence turns toward the experience.
@@ -165,7 +165,7 @@ describe("SPARK: the loop through the kernel", () => {
 			},
 			HOUR,
 		).state;
-		const after = s.beliefs["面试"];
+		const after = s.beliefs.面试;
 		expect(after.valence).toBeLessThan(before.valence);
 		expect(after.count).toBeGreaterThan(before.count);
 	});
